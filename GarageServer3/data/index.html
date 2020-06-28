@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Garage Door</title>
+    <link href='main.css' rel='stylesheet' type='text/css'>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
+    <link rel="icon" type="image/png" sizes="144x144"  href="/favicon-144x144.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.ico">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#00878f">
+    <meta content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0' name='viewport'>
+    <script src="WebSocket.js" type="text/javascript"></script>
+</head>
+
+<body onload="loadControls(4)">
+    <center>
+        <header>
+            <h1>Garage Door</h1>
+        </header>
+
+        <p id="buttons">
+        </p>
+
+        <br>
+		<button class="doorbutton" type="button" id="d1button" onclick="buttonOne()">DOOR 1</button>
+		<br>
+		<button class="doorbutton" type="button" id="d2button" onclick="buttonTwo()">DOOR 2</button>
+		<br>
+		<button class="doorbutton" type="button" id="d3button" onclick="buttonThree()">DOOR 3</button>
+		<br>
+		<hr>
+		<br>
+		<button class="settingsbutton" type="button" id="settings" onclick="settingsButton()">Settings</button>
+	</center
+</body>
+</html>
