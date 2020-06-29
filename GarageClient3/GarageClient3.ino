@@ -18,10 +18,15 @@
 ESP8266WiFiMulti WiFiMulti;
 WiFiManager wifiManager;
 
+#define DEVICE_NONE 0
+#define DEVICE_GARAGE 1
+#define DEVICE_THERMOMETOR 2
+#define DEVICE_RELAY 3
+#define DEVICE_IRSENSOR 4
+
 #define DOORUP 4
 #define DOORDOWN 5
-#define SENSOR_TYPE "GARAGE"
-#define SENSOR_NAME "DOOR"
+#define SENSOR_TYPE DEVICE_GARAGE
 
 bool doorUp, doorDown, startup = true;
 String macID = "";
@@ -78,21 +83,16 @@ void loop() {
 
     st = "http://192.168.7.83/set?mac=" + macID;
     st += '&';
-    st += "TYPE=";
+    st += "deviceType=";
     st += SENSOR_TYPE;
-     st += '&';
-    st += "NAME=";
-    st += SENSOR_NAME;   
     st += '&';
-    st += "UP=";
+    st += "sensor0=";
     if (!doorUp) st+= "TRUE"; else st += "FALSE";   //The sensors are reverse logic
     st += '&';
-    st += "DOWN=";
+    st += "sensor1=";
     if (!doorDown) st+= "TRUE"; else st += "FALSE";   //The sensors are reverse logic
     Serial.println(st);
     if (http.begin(client, st)) {  // HTTP
-
-
       Serial.print("[HTTP] GET...\n");
       // start connection and send HTTP header
       int httpCode = http.GET();

@@ -58,14 +58,16 @@ tr {
 }
 
 .settingsbutton {
-    display:block;
+/*    display:block; */
     text-decoration: none;
-    width: 50%;
+    width: 30%;
+    height: 40px;
     border: none;
     border-radius: 4px;
+    margin: 2px 10px 7px 10px;
     color: white;
     background-color: #00878F;
-    padding: 15px 24px;
+    padding: auto 24px;
     font-size: 24px;
     cursor: pointer;
     box-shadow: 1px 1px 6px #555;

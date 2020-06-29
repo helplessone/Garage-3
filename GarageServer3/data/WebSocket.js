@@ -1,5 +1,6 @@
 var rainbowEnable = false;
 var connection = new WebSocket('ws://'+location.hostname+':81/', ['arduino']);
+var json = JSON.parse(getJson());
 
 var YELLOW = "#ffcc00";
 var RED = "#ff0000";
@@ -70,29 +71,30 @@ function buttonThree() {
 	console.log('Button Three');
 }
 
-function addButton (identifier) {
-
-}
-
 function b1function(button) {
 
 	console.log("***** B1 Function ******");
 	console.log ("Button.id = " + button.id);
+	connection.send("#" + button.id);
 }
 
-function addDoorButton (doorName) {
+function saveSetting() {
+	console.log("***** saveSettings() ******");
+}
+
+function addDoorButton (deviceName, buttonid) {
 	var b1 = document.createElement("BUTTON"); // Create Button
-	b1.style.width = "95%";
+	if (json.devices.length > 4) b1.style.width = "45%"; else b1.style.width = "95%";
 	b1.style.height = "80px";
 	b1.style.margin = "5px";
 	b1.style.background = "blue";
 	b1.style.borderRadius = "10px";
 	b1.style.color = "white";
 	b1.style.fontSize = "24px";
-	b1.id = doorName;
+	b1.id = buttonid;
 
 	// Assign text to your button
-	b1.textContent = doorName;
+	b1.textContent = deviceName;
 
 	// Register click handlers to call respective functions
 	b1.onclick = function() {b1function(this);};
@@ -103,14 +105,44 @@ function addDoorButton (doorName) {
 	attachTo.appendChild(b1);
 }
 
-function loadControls(numDoors) {
-	var i;
-    var serverJSON = JSON.parse(getJson());
-    console.log(serverJSON["d1text"] + " " + serverJSON["d2text"] + " " + serverJSON["d2text"]);
-	addDoorButton(serverJSON["d2text"]);
-	addDoorButton(serverJSON["d3text"]);
-	addDoorButton(serverJSON["d1text"]);
+function addDoorTextBox (deviceName, textBoxID) {
+	var control = document.createElement("input"); // Create Button
+	if (json.devices.length > 4) control.style.width = "45%"; else control.style.width = "95%";
+	control.style.height = "40px";
+	control.style.margin = "5px";
+//	control.style.background = "blue";
+	control.style.borderRadius = "10px";
+	control.style.color = "black";
+	control.style.fontSize = "24px";
+	control.maxLength = 15;
+	control.id = textBoxID;
+
+	// Assign text to your button
+	control.value = deviceName;
+
+	var attachTo = document.getElementById("settingsControls"); //attach to settings area on html
+	attachTo.appendChild(control);
 }
+
+function loadMainControls() {
+	var i;
+	var jsonString = getJson();
+	if (jsonString !== "null") {
+		json = JSON.parse(jsonString);
+		for (i= 0; i< json.devices.length; i++) {
+			addDoorButton(json.devices[i].deviceName, json.devices[i].mac);
+		}
+	}
+}
+
+function loadSettingsControls() {
+	console.log("**** loadSettingsControls ****")
+	var i;
+    json = JSON.parse(getJson());
+
+	for (i= 0; i< json.devices.length; i++) {
+		addDoorTextBox(json.devices[i].deviceName, "T" + json.devices[i].mac);
+	}}
 
 function settingsButton() {
 	console.log("Settings Button");
@@ -119,37 +151,29 @@ function settingsButton() {
 setInterval(getJson, 2000);
 
 function getJson(){
-/*	console.log ("Get JSON"); */
-/*  console.log("d1button.value = " + document.getElementById("d1button").innerHTML); */
     var Httpreq = new XMLHttpRequest(); // a new request
     Httpreq.open("GET","/var.json",false);
     Httpreq.send(null);
     console.log("Response " + Httpreq.responseText);
-    var serverJSON = JSON.parse(Httpreq.responseText);
-    if (serverJSON["d1color"] == 0) document.getElementById("d1button").style.backgroundColor = RED;
-    if (serverJSON["d1color"] == 1) document.getElementById("d1button").style.backgroundColor = GREEN;
-    if (serverJSON["d1color"] == 2) document.getElementById("d1button").style.backgroundColor = YELLOW;
-    if (serverJSON["d1color"] == 3) document.getElementById("d1button").style.backgroundColor = GRAY;
-    if (serverJSON["d1color"] == 4) document.getElementById("d1button").style.backgroundColor = PURPLE;
-    if (serverJSON["d2color"] == 0) document.getElementById("d2button").style.backgroundColor = RED;
-    if (serverJSON["d2color"] == 1) document.getElementById("d2button").style.backgroundColor = GREEN;
-    if (serverJSON["d2color"] == 2) document.getElementById("d2button").style.backgroundColor = YELLOW;
-    if (serverJSON["d2color"] == 3) document.getElementById("d2button").style.backgroundColor = GRAY;
-    if (serverJSON["d2color"] == 4) document.getElementById("d2button").style.backgroundColor = PURPLE;
-    if (serverJSON["d3color"] == 0) document.getElementById("d3button").style.backgroundColor = RED;
-    if (serverJSON["d3color"] == 1) document.getElementById("d3button").style.backgroundColor = GREEN;
-    if (serverJSON["d3color"] == 2) document.getElementById("d3button").style.backgroundColor = YELLOW;
-    if (serverJSON["d3color"] == 3) document.getElementById("d3button").style.backgroundColor = GRAY;
-    if (serverJSON["d3color"] == 4) document.getElementById("d3button").style.backgroundColor = PURPLE;
 
-    document.getElementById("d1button").innerHTML = serverJSON["d1text"];
-    document.getElementById("d2button").innerHTML = serverJSON["d2text"];
-    document.getElementById("d3button").innerHTML = serverJSON["d3text"];
+    if (Httpreq.responseText !== "null") {
 
+		json = JSON.parse(Httpreq.responseText);
 
-	console.log(document.getElementById("d1button").innerHTML);
-	console.log(document.getElementById("d2button").innerHTML);
-	console.log(document.getElementById("d3button").innerHTML);
+		var i;
+		for (i=0; i<json.devices.length; i++) {
+			var sensors = (json.devices[i].sensor0*10) + json.devices[i].sensor1;
+			if (document.getElementById(json.devices[i].mac) != null) {
+				switch (sensors) {
+					case 1: document.getElementById(json.devices[i].mac).style.backgroundColor = RED; break;
+					case 0: document.getElementById(json.devices[i].mac).style.backgroundColor = YELLOW; break;
+					case 10: document.getElementById(json.devices[i].mac).style.backgroundColor = GREEN; break;
+					case 11: document.getElementById(json.devices[i].mac).style.backgroundColor = PURPLE; break;
+				}
+				document.getElementById(json.devices[i].mac).innerHTML = json.devices[i].deviceName;
+			}
+		}
+	}
 
     return Httpreq.responseText;
 }

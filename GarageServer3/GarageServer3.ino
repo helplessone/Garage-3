@@ -41,21 +41,22 @@ const char *OTAPassword = "esp8266";
 #define DEVICE_RELAY 3
 #define DEVICE_IRSENSOR 4
 
+#define SENSOR_TIMEOUT 20000
+
 typedef struct {
-  byte macID[6];
-  char deviceType;
+  byte mac[6];
+  int deviceType;
   char deviceName[16];
-  IPAddress ipAddress;
+  int devicePosition;
+  IPAddress ip;
   int sensor[2];
+  unsigned int timer;
+  int online;
 } device;
 
 device devices[MAX_DEVICES];
 
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
-
-//char json[] = "{\"color1\":RED,\"color2\":GREEN,\"color3\":YELLOW}"; 
-//JsonObject root = jsonDoc.as<JsonObject>();
-
 
 /*__________________________________________________________SETUP__________________________________________________________*/
 
@@ -65,32 +66,11 @@ void setup() {
   Serial.println("\r\n");
 
   memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices
-  
+  for (int i=0; i<MAX_DEVICES; i++) devices[0].deviceType = DEVICE_NONE;  //and set deviceType to NONE  
  
   pinMode(LED_RED, OUTPUT);    // the pins with LEDs connected are outputs
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_BLUE, OUTPUT);
-
-/*
-  JSON["d1color"] = GRAY;
-  JSON["d2color"] = GRAY;
-  JSON["d3color"] = GRAY;
-  JSON["d1text"] = "DOOR 91";
-  JSON["d2text"] = "DOOR 92";
-  JSON["d3text"] = "DOOR 93";
-
-
-  Serial.print("d1color = ");
-  Serial.println((int)JSON["d1color"]);
-  Serial.print("d2color = ");
-  Serial.println((int)JSON["d2color"]); 
-  Serial.print("d3color = ");
-  Serial.println((int)JSON["d3color"]);
-  serializeJson(JSON, Serial);
-  Serial.println();
-
- */
-
 
   startWiFi();                 // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
   startOTA();                  // Start the OTA service
@@ -99,9 +79,7 @@ void setup() {
   startMDNS();                 // Start the mDNS responder
   startServer();               // Start a HTTP server with a file read handler and an upload handler
 
-  Serial.println("Mac Address = " + WiFi.macAddress());
-  
-  
+  Serial.println("Mac Address = " + WiFi.macAddress());  
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
@@ -114,16 +92,16 @@ int hue = 0;
 void loop() {
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
-  ArduinoOTA.handle();                        // listen for OTA events
 
-  if(rainbow) {                               // if the rainbow effect is turned on
-    if(millis() > prevMillis + 32) {          
-      if(++hue == 360)                        // Cycle through the color wheel (increment by one degree every 32 ms)
-        hue = 0;
-      setHue(hue);                            // Set the RGB LED to the right color
-      prevMillis = millis();
+  for (int i=0; i<MAX_DEVICES; i++) {
+    if (devices[i].deviceType != DEVICE_NONE){
+      if (millis() - devices[i].timer > SENSOR_TIMEOUT) {
+        devices[i].online = 0;
+        devices[i].timer = millis() - SENSOR_TIMEOUT;   //keep timer from rolling over
+      }
     }
   }
+  ArduinoOTA.handle();                        // listen for OTA events
 }
 
 int getDeviceCount (int deviceType) {
@@ -135,31 +113,44 @@ int getDeviceCount (int deviceType) {
 }
 
 String getJSONString() {
-  StaticJsonDocument<JSON_BUF_SIZE> JSON;
+  StaticJsonDocument<JSON_BUF_SIZE> doc;
   String st;
-  bool found = false;
-
-  JSON["GARAGE_CNT"] = getDeviceCount(DEVICE_GARAGE);
   for (int i=0; i<MAX_DEVICES; i++) {
-    if (devices[i].macID[0] != 0) {
-      JSON["DEVICES"][i]["macID"] = macIDToString(devices[i].macID);      
-      JSON["DEVICES"][i]["type"] = (char)devices[i].deviceType;
-      JSON["DEVICES"][i]["deviceName"] = devices[i].deviceName;
-      JSON["DEVICES"][i]["ipAddress"] = ipAddressToString(devices[i].ipAddress);
-      JSON["DEVICES"][i]["sensor0"] = devices[i].sensor[0];   
-      JSON["DEVICES"][i]["sensor1"] = devices[i].sensor[1]; 
+    if (devices[i].deviceType != DEVICE_NONE) {
+      doc["devices"][i]["mac"] = macIDToString(devices[i].mac);      
+      doc["devices"][i]["deviceType"] = devices[i].deviceType;
+      doc["devices"][i]["deviceName"] = devices[i].deviceName;
+      doc["devices"][i]["devicePosition"] = devices[i].devicePosition;
+      doc["devices"][i]["ip"] = ipAddressToString(devices[i].ip);
+      doc["devices"][i]["sensor0"] = devices[i].sensor[0];   
+      doc["devices"][i]["sensor1"] = devices[i].sensor[1]; 
+      doc["devices"][i]["timer"] = devices[i].timer; 
+      doc["devices"][i]["online"] = devices[i].online; 
     } 
   }
-  serializeJson(JSON,st);
-  Serial.println("devicesToJSON = " + st);
+  serializeJson(doc,st);
   return st;  
 }
 
-void saveJSON() {
-  
+void saveSettings() {
+  for (int i=0; i<MAX_DEVICES; i++) {
+    deviceToString(devices[i]);
+  }
 }
 
-void restoreJSON() {
+void restoreSettings() {
+
+}
+
+String deviceToString(device Device) {
+  char buffer[200];
+  sprintf(buffer,"%s|%c|%s|%d|%s|%d|%d|%u|%d",macIDToString(Device.mac).c_str(),Device.deviceType,Device.deviceName,Device.devicePosition,ipAddressToString(Device.ip).c_str(),Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+  Serial.print("|");
+  Serial.print(buffer);
+  Serial.println("|");  
+}
+
+void stringToDevice (String st, device *Device) {
   
 }
  
@@ -167,23 +158,7 @@ void restoreJSON() {
 
 void startWiFi() { // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
   wifiManager.autoConnect("Garage Door Server");
-/*  
-  WiFi.softAP(ssid, password);             // Start the access point
-  Serial.print("Access Point \"");
-  Serial.print(ssid);
-  Serial.println("\" started\r\n");
-
-  wifiMulti.addAP("Peterson", "7758499666");   // add Wi-Fi networks you want to connect to
-  wifiMulti.addAP("ssid_from_AP_2", "your_password_for_AP_2");
-  wifiMulti.addAP("ssid_from_AP_3", "your_password_for_AP_3");
-
-  Serial.println("Connecting");
-  while (wifiMulti.run() != WL_CONNECTED && WiFi.softAPgetStationNum() < 1) {  // Wait for the Wi-Fi to connect
-    delay(250);
-    Serial.print('.');
-  }
-  Serial.println("\r\n");
-*/  
+  
   if(WiFi.softAPgetStationNum() == 0) {      // If the ESP is connected to an AP
     Serial.print("Connected to ");
     Serial.println(WiFi.SSID());             // Tell us what network we're connected to
@@ -272,19 +247,19 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
 /*__________________________________________________________SERVER_HANDLERS__________________________________________________________*/
 
 void parseString(const char* str, char sep, byte* bytes, int maxBytes, int base) {
-    for (int i = 0; i < maxBytes; i++) {
-        bytes[i] = strtoul(str, NULL, base);  // Convert byte
-        str = strchr(str, sep);               // Find next separator
-        if (str == NULL || *str == '\0') {
-            break;                            // No more separators, exit
-        }
-        str++;                                // Point to next character after separator
+  for (int i = 0; i < maxBytes; i++) {
+    bytes[i] = strtoul(str, NULL, base);  // Convert byte
+    str = strchr(str, sep);               // Find next separator
+    if (str == NULL || *str == '\0') {
+      break;                            // No more separators, exit
     }
+    str++;                                // Point to next character after separator
+  }
 }
 
 int getAvailableDevice() {
   for (int i = 0; i<MAX_DEVICES; i++) {
-    if (devices[i].macID[0] == 0) return i;
+    if (devices[i].deviceType == DEVICE_NONE) return i;
   }
   return -1;  
 }
@@ -299,7 +274,7 @@ String macIDToString (byte macID[]) {
 
 int deviceCount () {
   int count = 0;
-  for (int i=0; i<MAX_DEVICES; i++) if (devices[i].macID[0] != 0) count++;
+  for (int i=0; i<MAX_DEVICES; i++) if (devices[i].deviceType != DEVICE_NONE) count++;
   return count;
 }
 
@@ -323,7 +298,7 @@ int getDeviceIndex (String macString, bool *newDevice) {
   if (macString == "") return -1;
   parseString(macString.c_str(), ':', macID, 6, 16);
   for (int deviceIndex=0; deviceIndex<MAX_DEVICES; deviceIndex++) {
-    if (memcmp(devices[deviceIndex].macID,macID,6) == 0) {
+    if (memcmp(devices[deviceIndex].mac,macID,sizeof(macID)) == 0) {
       DEVICE = deviceIndex;
       found = true;
       break;
@@ -336,7 +311,7 @@ int getDeviceIndex (String macString, bool *newDevice) {
       delay(5000);
       return -1;      
     }
-    memcpy(devices[DEVICE].macID,macID,sizeof(macID));
+    memcpy(devices[DEVICE].mac,macID,sizeof(macID));
     *newDevice = true;
     Serial.print("******* NEW DEVICE ADDED ******** deviceIndex = ");
     Serial.println (DEVICE);
@@ -353,23 +328,28 @@ int trueFalse(String st) {
 
 void displayDevice (int deviceIndex) {
   if (deviceIndex < 0 || deviceIndex >= MAX_DEVICES) {
-    Serial.println("**** Invalid deviceIndex ****");
+    Serial.print("**** Invalid deviceIndex **** deviceIndex = ");
+    Serial.println (deviceIndex);
     return;
   }
-  if (devices[deviceIndex].macID[0] == 0) return;
+  if (devices[deviceIndex].deviceType == DEVICE_NONE) return;
   Serial.println("****************************");
   Serial.print("Device Index: ");
   Serial.println (deviceIndex);
-  Serial.println("macID: " + macIDToString(devices[deviceIndex].macID));
+  Serial.println("mac: " + macIDToString(devices[deviceIndex].mac));
   Serial.print("Device Name: ");
   Serial.println(devices[deviceIndex].deviceName);
-  Serial.println("IP: How do I get this?" + devices[deviceIndex].ipAddress);
+  Serial.println("IP: How do I get this?" + devices[deviceIndex].ip);
   Serial.print("deviceType: ");
   Serial.println(devices[deviceIndex].deviceType);
   Serial.print("sensor 1: ");
   Serial.println(devices[deviceIndex].sensor[0]);
   Serial.print("sensor 2: ");
   Serial.println(devices[deviceIndex].sensor[1]);
+  Serial.print("timer: ");
+  Serial.println(devices[deviceIndex].timer);  
+  Serial.print("online: ");
+  Serial.println(devices[deviceIndex].online);  
   Serial.println("****************************");
   
 }
@@ -398,34 +378,47 @@ void handleSet () {
       if (newDevice) {
         Serial.println ("NEW DEVICE!!!!!");
       }
+      devices[deviceIndex].timer = millis();
+      devices[deviceIndex].online = 1;
     }
+    
+    if (server.argName(i) == "save") {
+      saveSettings();
+    }
+    if (server.argName(i) == "restore") {
+      restoreSettings();
+    }
+   
     if (deviceIndex > -1) {
-      if (server.argName(i) == "TYPE") devices[deviceIndex].deviceType = server.arg(i).c_str()[0];
-      if (server.argName(i) == "UP") devices[deviceIndex].sensor[0] = trueFalse(server.arg(i));
-      if (server.argName(i) == "DOWN") devices[deviceIndex].sensor[1] = trueFalse(server.arg(i));
-      if (server.argName(i) == "NAME" && newDevice) {
+      if (server.argName(i) == "deviceType") {
+        String st = server.arg(i);
+        devices[deviceIndex].deviceType = st.toInt();
+      }
+      if (server.argName(i) == "sensor0") devices[deviceIndex].sensor[0] = trueFalse(server.arg(i));
+      if (server.argName(i) == "sensor1") devices[deviceIndex].sensor[1] = trueFalse(server.arg(i));
+      if (server.argName(i) == "devicePosition") {
+        String st = server.arg(i);
+        devices[deviceIndex].devicePosition = st.toInt();
+      }
+      if (server.argName(i) == "deviceName") {
+        Serial.println("********************* deviceName ****************** =");
         int str_len = server.arg(i).length() + 1;
         if (str_len > 15) str_len = 15;
         char char_array[16];
         server.arg(i).toCharArray(char_array, str_len);
         memcpy(devices[deviceIndex].deviceName, char_array, str_len);
+        Serial.println (devices[deviceIndex].deviceName);
       }
-      if (server.argName(i) == "RENAME") {
-        int str_len = server.arg(i).length() + 1;
-        if (str_len > 15) str_len = 15;
-        char char_array[16];
-        server.arg(i).toCharArray(char_array, str_len);
-        memcpy(devices[deviceIndex].deviceName, char_array, str_len);
-      }
-   }
+    }
   } //end for
+  Serial.println(message);
 
   Serial.print ("----- Device Count = ");
   Serial.println (deviceCount());
   
   server.send(200, "text/plain", getJSONString());
   
-  displayDevice(deviceIndex);
+  if (deviceIndex > -1) displayDevice(deviceIndex);
 }
 
 void handleNotFound(){ // if the requested file or page doesn't exist, return a 404 not found error
@@ -496,16 +489,11 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
       }
       break;
     case WStype_TEXT:                     // if new text data is received
-      Serial.printf("[%u] get Text: %s\n", num, payload);
-      if (payload[0] == '#') {            // we get RGB data
-        uint32_t rgb = (uint32_t) strtol((const char *) &payload[1], NULL, 16);   // decode rgb data
-        int r = ((rgb >> 20) & 0x3FF);                     // 10 bits per color, so R: bits 20-29
-        int g = ((rgb >> 10) & 0x3FF);                     // G: bits 10-19
-        int b =          rgb & 0x3FF;                      // B: bits  0-9
-
-        analogWrite(LED_RED,   r);                         // write it to the LED output pins
-        analogWrite(LED_GREEN, g);
-        analogWrite(LED_BLUE,  b);
+//      Serial.printf("[%u] get Text: %s\n", num, payload);
+      if (payload[0] == '#') {            // button was pressed
+        Serial.print ("Key Pressed: ");
+        String st = (char *)payload;
+        Serial.println(st.substring(1,st.length()));               
       } else {
         switch (payload[0]) {
           case '1': {                      // Door 1 pressed
@@ -525,8 +513,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         } //end switch payload[0]
       }   //end else
   }  //end switch(type)
-}  
-
+}
 
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
 
@@ -547,33 +534,4 @@ String getContentType(String filename) { // determine the filetype of a given fi
   else if (filename.endsWith(".ico")) return "image/x-icon";
   else if (filename.endsWith(".gz")) return "application/x-gzip";
   return "text/plain";
-}
-
-void setHue(int hue) { // Set the RGB LED to a given hue (color) (0° = Red, 120° = Green, 240° = Blue)
-  hue %= 360;                   // hue is an angle between 0 and 359°
-  float radH = hue*3.142/180;   // Convert degrees to radians
-  float rf, gf, bf;
-  
-  if(hue>=0 && hue<120){        // Convert from HSI color space to RGB              
-    rf = cos(radH*3/4);
-    gf = sin(radH*3/4);
-    bf = 0;
-  } else if(hue>=120 && hue<240){
-    radH -= 2.09439;
-    gf = cos(radH*3/4);
-    bf = sin(radH*3/4);
-    rf = 0;
-  } else if(hue>=240 && hue<360){
-    radH -= 4.188787;
-    bf = cos(radH*3/4);
-    rf = sin(radH*3/4);
-    gf = 0;
-  }
-  int r = rf*rf*1023;
-  int g = gf*gf*1023;
-  int b = bf*bf*1023;
-  
-  analogWrite(LED_RED,   r);    // Write the right color to the LED output pins
-  analogWrite(LED_GREEN, g);
-  analogWrite(LED_BLUE,  b);
 }
