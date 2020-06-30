@@ -45,10 +45,10 @@ const char *OTAPassword = "esp8266";
 
 typedef struct {
   byte mac[6];
-  int deviceType;
+  byte ip[4];
   char deviceName[16];
+  int deviceType;
   int devicePosition;
-  IPAddress ip;
   int sensor[2];
   unsigned int timer;
   int online;
@@ -65,8 +65,7 @@ void setup() {
   delay(10);
   Serial.println("\r\n");
 
-  memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices
-  for (int i=0; i<MAX_DEVICES; i++) devices[0].deviceType = DEVICE_NONE;  //and set deviceType to NONE  
+  clearDevices();
  
   pinMode(LED_RED, OUTPUT);    // the pins with LEDs connected are outputs
   pinMode(LED_GREEN, OUTPUT);
@@ -78,8 +77,9 @@ void setup() {
   startWebSocket();            // Start a WebSocket server
   startMDNS();                 // Start the mDNS responder
   startServer();               // Start a HTTP server with a file read handler and an upload handler
-
+  delay(300);
   Serial.println("Mac Address = " + WiFi.macAddress());  
+  restoreSettings();
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
@@ -117,11 +117,11 @@ String getJSONString() {
   String st;
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE) {
-      doc["devices"][i]["mac"] = macIDToString(devices[i].mac);      
+      doc["devices"][i]["mac"] = macToString(devices[i].mac);      
       doc["devices"][i]["deviceType"] = devices[i].deviceType;
       doc["devices"][i]["deviceName"] = devices[i].deviceName;
       doc["devices"][i]["devicePosition"] = devices[i].devicePosition;
-      doc["devices"][i]["ip"] = ipAddressToString(devices[i].ip);
+      doc["devices"][i]["ip"] = ipToString(devices[i].ip);
       doc["devices"][i]["sensor0"] = devices[i].sensor[0];   
       doc["devices"][i]["sensor1"] = devices[i].sensor[1]; 
       doc["devices"][i]["timer"] = devices[i].timer; 
@@ -132,22 +132,83 @@ String getJSONString() {
   return st;  
 }
 
+void clearDevices() {
+  memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices
+  for (int i=0; i<MAX_DEVICES; i++) devices[0].deviceType = DEVICE_NONE;  //and set deviceType to NONE 
+} 
+
 void saveSettings() {
+  String st;
+  File f = SPIFFS.open("/devices.txt","w");
+  if (!f) return;
   for (int i=0; i<MAX_DEVICES; i++) {
-    deviceToString(devices[i]);
+    if (devices[i].deviceType != DEVICE_NONE) {
+      st = deviceToString(devices[i]);
+      Serial.print (i);
+      Serial.println (": " + st);
+      f.println(st);
+    }
   }
+  f.close();
 }
 
 void restoreSettings() {
+  device Device;
+  String field;
+  int deviceIndex = 0;
+  byte mac[6];
+  char buffer[200];
+  String st;
+  File f = SPIFFS.open("/devices.txt","r");
+  if (!f) return;
+  clearDevices();
+  while (f.available() && (deviceIndex < MAX_DEVICES)) {
+    int cnt = f.readBytesUntil('\n',buffer,sizeof(buffer));
+    buffer[cnt] = 0;
+    st = buffer;
 
+    Serial.println("---------------------");
+    Serial.println(buffer);
+    
+    field = st.substring(0,st.indexOf('|'));
+    Serial.println ("mac field = " + field);  
+    parseString(field.c_str(), ':', Device.mac, 6, 16); // Get mac address
+    Serial.printf("%x:%x:%x:%x:%x:%x\n",Device.mac[0],Device.mac[1],Device.mac[2],Device.mac[3],Device.mac[4],Device.mac[5]);
+    st.remove(0,st.indexOf('|')+1); //remove mac
+
+    Serial.println("after remove: " + st);
+
+    field = st.substring(0,st.indexOf('|'));  //get ip    
+    Serial.println ("ip field = " + field);  
+    parseString(field.c_str(), '.', Device.ip, 4, 10); // Get mac address
+    Serial.printf("Device ip: %d.%d.%d.%d\n",Device.ip[0],Device.ip[1],Device.ip[2],Device.ip[3]);
+    st.remove(0,st.indexOf('|')+1); //remove ip
+
+    field = st.substring(0,st.indexOf('|'));  //get name
+    Serial.println ("name field = |" + field + "|" + " length = " + field.length());
+    if (field.length() == 0) memset(Device.deviceName,'\0',sizeof(Device.deviceName));
+    else sscanf(field.c_str(),"%15s",Device.deviceName);
+    Serial.printf("deviceName = |%s|\n",Device.deviceName);
+    Serial.print ("Name length = ");
+    Serial.println (strlen(Device.deviceName));
+    st.remove(0,st.indexOf('|')+1); //remove name
+    Serial.println("After Remove Name: " + st);
+
+    sscanf(st.c_str(),"%d|%d|%d|%d|%lu|%d",&Device.deviceType,&Device.devicePosition,&Device.sensor[0],&Device.sensor[1],&Device.timer,&Device.online);
+    Serial.printf("Here it is: |%s|%s|%s|%d|%d|%d|%d|%lu|%d|",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+    memcpy(&(devices[deviceIndex]),&Device,sizeof(Device));
+    deviceIndex++;    
+    Serial.println("---------------------");    
+  }
+  f.close();
 }
 
 String deviceToString(device Device) {
+  String st;
   char buffer[200];
-  sprintf(buffer,"%s|%c|%s|%d|%s|%d|%d|%u|%d",macIDToString(Device.mac).c_str(),Device.deviceType,Device.deviceName,Device.devicePosition,ipAddressToString(Device.ip).c_str(),Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
-  Serial.print("|");
-  Serial.print(buffer);
-  Serial.println("|");  
+  sprintf(buffer,"%s|%s|%s|%d|%d|%d|%d|%u|%d",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+  st = buffer; 
+  return st;
 }
 
 void stringToDevice (String st, device *Device) {
@@ -264,7 +325,7 @@ int getAvailableDevice() {
   return -1;  
 }
 
-String macIDToString (byte macID[]) {
+String macToString (byte macID[]) {
   String st;
   char buf[20];
   sprintf(buf,"%x:%x:%x:%x:%x:%x", macID[0], macID[1], macID[2], macID[3], macID[4], macID[5]);
@@ -278,12 +339,13 @@ int deviceCount () {
   return count;
 }
 
-String ipAddressToString(const IPAddress& ipAddress)
+String ipToString(byte ip[])
 {
-  return String(ipAddress[0]) + String(".") +\
-  String(ipAddress[1]) + String(".") +\
-  String(ipAddress[2]) + String(".") +\
-  String(ipAddress[3])  ;
+  String st;
+  char buf[20];
+  sprintf(buf,"%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  st = buf;
+  return st;
 }
 
 int getDeviceIndex (String macString, bool *newDevice) {
@@ -336,10 +398,10 @@ void displayDevice (int deviceIndex) {
   Serial.println("****************************");
   Serial.print("Device Index: ");
   Serial.println (deviceIndex);
-  Serial.println("mac: " + macIDToString(devices[deviceIndex].mac));
+  Serial.println("mac: " + macToString(devices[deviceIndex].mac));
   Serial.print("Device Name: ");
   Serial.println(devices[deviceIndex].deviceName);
-  Serial.println("IP: How do I get this?" + devices[deviceIndex].ip);
+  Serial.println("IP: " + ipToString(devices[deviceIndex].ip));
   Serial.print("deviceType: ");
   Serial.println(devices[deviceIndex].deviceType);
   Serial.print("sensor 1: ");
@@ -350,14 +412,29 @@ void displayDevice (int deviceIndex) {
   Serial.println(devices[deviceIndex].timer);  
   Serial.print("online: ");
   Serial.println(devices[deviceIndex].online);  
-  Serial.println("****************************");
-  
+  Serial.println("****************************");  
+}
+
+int setDevice (String mac, String var, String val) {
+  bool newDevice;
+  int deviceIndex = getDeviceIndex(mac, &newDevice);
+  if (deviceIndex > -1) {
+    if (var == "deviceName") {
+      int str_len = val.length() + 1;
+      if (str_len > 15) str_len = 15;
+      char char_array[16];
+      val.toCharArray(char_array, str_len);
+      memcpy(devices[deviceIndex].deviceName, char_array, str_len);
+      return 0;        
+    }
+  }
 }
 
 void handleSet () {
   String st;
   String Up = "", Down = "";
   String macString = "";
+  String ipString = "";
   int deviceIndex = -1;
   bool newDevice;
   char deviceName[16];
@@ -365,8 +442,19 @@ void handleSet () {
   String message = "Number of args received:";
   message += server.args();
   message += "\n";
-  Serial.println(message);
-  Serial.println(server.uri());
+//  Serial.println(message);
+//  Serial.println(server.uri());
+  if (server.argName(0) == "save") {
+    saveSettings();
+    server.send(200, "text/plain", "");
+    return;
+
+  }
+  if (server.argName(0) == "restore") {
+    restoreSettings();
+    server.send(200, "text/plain", "");
+    return;    
+  }
   for (int i=0; i<server.args(); i++) {
     message += "Arg " + (String)i + " -> ";
     message += server.argName(i) + ": ";
@@ -380,15 +468,7 @@ void handleSet () {
       }
       devices[deviceIndex].timer = millis();
       devices[deviceIndex].online = 1;
-    }
-    
-    if (server.argName(i) == "save") {
-      saveSettings();
-    }
-    if (server.argName(i) == "restore") {
-      restoreSettings();
-    }
-   
+    }  
     if (deviceIndex > -1) {
       if (server.argName(i) == "deviceType") {
         String st = server.arg(i);
@@ -401,24 +481,25 @@ void handleSet () {
         devices[deviceIndex].devicePosition = st.toInt();
       }
       if (server.argName(i) == "deviceName") {
-        Serial.println("********************* deviceName ****************** =");
         int str_len = server.arg(i).length() + 1;
         if (str_len > 15) str_len = 15;
         char char_array[16];
         server.arg(i).toCharArray(char_array, str_len);
         memcpy(devices[deviceIndex].deviceName, char_array, str_len);
-        Serial.println (devices[deviceIndex].deviceName);
+      }
+      if (server.argName(i) == "ip") {
+        String ipstr = server.arg(i);
+        byte ip[4];
+        parseString(ipstr.c_str(), '.', ip, 4, 10); // Get mac address
+        memcpy(devices[deviceIndex].ip,ip,4);
       }
     }
   } //end for
-  Serial.println(message);
-
-  Serial.print ("----- Device Count = ");
-  Serial.println (deviceCount());
-  
+ 
   server.send(200, "text/plain", getJSONString());
   
-  if (deviceIndex > -1) displayDevice(deviceIndex);
+  if (newDevice && deviceIndex > -1) displayDevice(deviceIndex);
+  for (int i = 0; i<2; i++) displayDevice(i);
 }
 
 void handleNotFound(){ // if the requested file or page doesn't exist, return a 404 not found error
@@ -477,6 +558,13 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
   }
 }
 
+int parseCommand(String command, String *mac, String *var, String *val) {
+  *mac = command.substring(1,command.indexOf('?'));
+  *var = command.substring(command.indexOf('?')+1,command.indexOf('='));
+  *val = command.substring(command.indexOf('=')+1,command.length());
+}
+
+
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
   switch (type) {
     case WStype_DISCONNECTED:             // if the websocket is disconnected
@@ -488,31 +576,49 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         rainbow = false;                  // Turn rainbow off when a new connection is established
       }
       break;
-    case WStype_TEXT:                     // if new text data is received
+    case WStype_TEXT: {                    // if new text data is received
 //      Serial.printf("[%u] get Text: %s\n", num, payload);
-      if (payload[0] == '#') {            // button was pressed
-        Serial.print ("Key Pressed: ");
-        String st = (char *)payload;
-        Serial.println(st.substring(1,st.length()));               
-      } else {
-        switch (payload[0]) {
-          case '1': {                      // Door 1 pressed
-              Serial.println("Door 1 pressed");
-           
-//              webSocket.send(JSON.ToString());
+      switch(payload[0]) {
+        case '#': {     // button was pressed        
+          Serial.print ("Key Pressed: ");
+          String st = (char *)payload;
+          Serial.println(st.substring(1,st.length()));
+        }
+        break;
+        case '*': {     //update variable
+          String mac="", var="", val="";
+          String command = (char *)payload;
+          parseCommand(command, &mac, &var, &val);
+          Serial.print("parseCommand:");
+          Serial.println((char *)payload);
+          Serial.println (mac + " " + var + " " + val);
+          setDevice(mac, var, val);                        
+        }
+        break;
+        default: {
+          switch (payload[0]) {
+            case '1': {                      // Door 1 pressed
+                Serial.println("Door 1 pressed");             
+  //            webSocket.send(JSON.ToString());
             }
             break;
-          case '2': {                      // Door 2 pressed
+            case '2': {                      // Door 2 pressed
               Serial.println("Door 2 pressed");
             }          
             break;
-          case '3': {                      // Door 3 pressed
+            case '3': {                      // Door 3 pressed
               Serial.println("Door 3 pressed");
             }
             break;
-        } //end switch payload[0]
-      }   //end else
-  }  //end switch(type)
+            case 'S': {
+                saveSettings();
+            }
+            break;
+          } //end switch payload[0]
+        } //default
+      } //end switch(payload[0]
+    }  //end WStype_TEXT
+  }  //end switch(Type)
 }
 
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/

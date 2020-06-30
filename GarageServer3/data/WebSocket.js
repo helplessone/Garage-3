@@ -8,6 +8,14 @@ var GREEN = "#009900";
 var GRAY = "#999999";
 var PURPLE = "#3333cc"
 
+var OFFLINE_YELLOW = "#ffE066";
+var OFFLINE_RED = "#ff9999";
+var OFFLINE_GREEN = "#99ff99";
+var OFFLINE_GRAY = "#cccccc";
+var OFFLINE_PURPLE = "#8585e0"
+
+var DEVICE_GARAGE = "1";
+
 connection.onopen = function () {
     connection.send("Connect " + new Date());
 };
@@ -78,9 +86,20 @@ function b1function(button) {
 	connection.send("#" + button.id);
 }
 
-function saveSetting() {
+function saveSettings() {
+	var i;
 	console.log("***** saveSettings() ******");
+	for (i= 0; i< json.devices.length; i++) {
+		var value = document.getElementById("T"+json.devices[i].mac).value;
+		var st = "*" + json.devices[i].mac + "?deviceName=" + value;
+		connection.send(st);
+		console.log(st);
+	}
+	connection.send("S");
+	alert("Settings saved...");
+	console.log("Setting saved.");
 }
+
 
 function addDoorButton (deviceName, buttonid) {
 	var b1 = document.createElement("BUTTON"); // Create Button
@@ -142,11 +161,10 @@ function loadSettingsControls() {
 
 	for (i= 0; i< json.devices.length; i++) {
 		addDoorTextBox(json.devices[i].deviceName, "T" + json.devices[i].mac);
-	}}
-
-function settingsButton() {
-	console.log("Settings Button");
+	}
 }
+
+
 
 setInterval(getJson, 2000);
 
@@ -162,13 +180,19 @@ function getJson(){
 
 		var i;
 		for (i=0; i<json.devices.length; i++) {
-			var sensors = (json.devices[i].sensor0*10) + json.devices[i].sensor1;
+			var sensors = (json.devices[i].online*100) + (json.devices[i].sensor0*10) + json.devices[i].sensor1;
 			if (document.getElementById(json.devices[i].mac) != null) {
 				switch (sensors) {
-					case 1: document.getElementById(json.devices[i].mac).style.backgroundColor = RED; break;
-					case 0: document.getElementById(json.devices[i].mac).style.backgroundColor = YELLOW; break;
-					case 10: document.getElementById(json.devices[i].mac).style.backgroundColor = GREEN; break;
-					case 11: document.getElementById(json.devices[i].mac).style.backgroundColor = PURPLE; break;
+				//online values
+					case 101: document.getElementById(json.devices[i].mac).style.backgroundColor = RED; break;
+					case 100: document.getElementById(json.devices[i].mac).style.backgroundColor = YELLOW; break;
+					case 110: document.getElementById(json.devices[i].mac).style.backgroundColor = GREEN; break;
+					case 111: document.getElementById(json.devices[i].mac).style.backgroundColor = PURPLE; break;
+				//offline values
+					case 1: document.getElementById(json.devices[i].mac).style.backgroundColor = OFFLINE_RED; break;
+					case 0: document.getElementById(json.devices[i].mac).style.backgroundColor = OFFLINE_YELLOW; break;
+					case 10: document.getElementById(json.devices[i].mac).style.backgroundColor = OFFLINE_GREEN; break;
+					case 11: document.getElementById(json.devices[i].mac).style.backgroundColor = OFFLINE_PURPLE; break;
 				}
 				document.getElementById(json.devices[i].mac).innerHTML = json.devices[i].deviceName;
 			}
