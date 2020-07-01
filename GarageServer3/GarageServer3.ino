@@ -1,5 +1,5 @@
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
+//#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
@@ -16,8 +16,8 @@ WiFiManager wifiManager;
 
 File fsUploadFile;                 // a File variable to temporarily store the received file
 
-const char *ssid = "mynetwork"; // The name of the Wi-Fi network that will be created
-const char *password = "";   // The password required to connect to it, leave blank for an open network
+//const char *ssid = "mynetwork"; // The name of the Wi-Fi network that will be created
+//const char *password = "";   // The password required to connect to it, leave blank for an open network
 
 const char *OTAName = "ESP8266";           // A name and a password for the OTA service
 const char *OTAPassword = "esp8266";
@@ -92,7 +92,7 @@ int hue = 0;
 void loop() {
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
-
+  
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE){
       if (millis() - devices[i].timer > SENSOR_TIMEOUT) {
@@ -325,18 +325,18 @@ int getAvailableDevice() {
   return -1;  
 }
 
+int deviceCount () {
+  int count = 0;
+  for (int i=0; i<MAX_DEVICES; i++) if (devices[i].deviceType != DEVICE_NONE) count++;
+  return count;
+}
+
 String macToString (byte macID[]) {
   String st;
   char buf[20];
   sprintf(buf,"%x:%x:%x:%x:%x:%x", macID[0], macID[1], macID[2], macID[3], macID[4], macID[5]);
   st = buf;
   return st;
-}
-
-int deviceCount () {
-  int count = 0;
-  for (int i=0; i<MAX_DEVICES; i++) if (devices[i].deviceType != DEVICE_NONE) count++;
-  return count;
 }
 
 String ipToString(byte ip[])
@@ -416,6 +416,8 @@ void displayDevice (int deviceIndex) {
 }
 
 int setDevice (String mac, String var, String val) {
+//Set variable (var) in device array for sensor (mac) to (val)
+//if (mac) doesn't exist in devices, it is added and (var) is set to (val)  
   bool newDevice;
   int deviceIndex = getDeviceIndex(mac, &newDevice);
   if (deviceIndex > -1) {
@@ -559,6 +561,7 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
 }
 
 int parseCommand(String command, String *mac, String *var, String *val) {
+  //command format: "*mac?var=val" - the * can be any character, but not the ? and = characters
   *mac = command.substring(1,command.indexOf('?'));
   *var = command.substring(command.indexOf('?')+1,command.indexOf('='));
   *val = command.substring(command.indexOf('=')+1,command.length());

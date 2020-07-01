@@ -6,13 +6,13 @@ var YELLOW = "#ffcc00";
 var RED = "#ff0000";
 var GREEN = "#009900";
 var GRAY = "#999999";
-var PURPLE = "#3333cc"
+var PURPLE = "#5c00e6"
 
 var OFFLINE_YELLOW = "#ffE066";
 var OFFLINE_RED = "#ff9999";
 var OFFLINE_GREEN = "#99ff99";
 var OFFLINE_GRAY = "#cccccc";
-var OFFLINE_PURPLE = "#8585e0"
+var OFFLINE_PURPLE = "#a366ff"
 
 var DEVICE_GARAGE = "1";
 
@@ -100,7 +100,6 @@ function saveSettings() {
 	console.log("Setting saved.");
 }
 
-
 function addDoorButton (deviceName, buttonid) {
 	var b1 = document.createElement("BUTTON"); // Create Button
 	if (json.devices.length > 4) b1.style.width = "45%"; else b1.style.width = "95%";
@@ -163,8 +162,6 @@ function loadSettingsControls() {
 		addDoorTextBox(json.devices[i].deviceName, "T" + json.devices[i].mac);
 	}
 }
-
-
 
 setInterval(getJson, 2000);
 
