@@ -36,10 +36,12 @@ const char *OTAPassword = "esp8266";
 #define JSON_BUF_SIZE 2048
 
 #define DEVICE_NONE 0
+#define DEVICE_ANY 99
 #define DEVICE_GARAGE 1
 #define DEVICE_THERMOMETOR 2
 #define DEVICE_RELAY 3
 #define DEVICE_IRSENSOR 4
+#define DEVICE_WATER 5
 
 #define SENSOR_TIMEOUT 20000
 
@@ -107,7 +109,7 @@ void loop() {
 int getDeviceCount (int deviceType) {
   int cnt = 0;
   for (int i=0; i<MAX_DEVICES; i++) {
-    if (devices[i].deviceType == deviceType) cnt++;
+    if (devices[i].deviceType == deviceType || ((deviceType == DEVICE_ANY) && (devices[i].deviceType != DEVICE_NONE))) cnt++;
   }
   return cnt;
 }
@@ -133,7 +135,7 @@ String getJSONString() {
 }
 
 void clearDevices() {
-  memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices
+  memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices array to 0's
   for (int i=0; i<MAX_DEVICES; i++) devices[0].deviceType = DEVICE_NONE;  //and set deviceType to NONE 
 } 
 
@@ -162,12 +164,12 @@ void restoreSettings() {
   File f = SPIFFS.open("/devices.txt","r");
   if (!f) return;
   clearDevices();
+  Serial.println("\n--------- restoreSettings() ------------");
   while (f.available() && (deviceIndex < MAX_DEVICES)) {
     int cnt = f.readBytesUntil('\n',buffer,sizeof(buffer));
     buffer[cnt] = 0;
     st = buffer;
 
-    Serial.println("---------------------");
     Serial.println(buffer);
     
     field = st.substring(0,st.indexOf('|'));
@@ -195,12 +197,13 @@ void restoreSettings() {
     Serial.println("After Remove Name: " + st);
 
     sscanf(st.c_str(),"%d|%d|%d|%d|%lu|%d",&Device.deviceType,&Device.devicePosition,&Device.sensor[0],&Device.sensor[1],&Device.timer,&Device.online);
-    Serial.printf("Here it is: |%s|%s|%s|%d|%d|%d|%d|%lu|%d|",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+    Serial.printf("Restored Device: |%s|%s|%s|%d|%d|%d|%d|%lu|%d|\n",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
     memcpy(&(devices[deviceIndex]),&Device,sizeof(Device));
     deviceIndex++;    
     Serial.println("---------------------");    
   }
-  f.close();
+  Serial.println("\n----------- end restoreSettings() ----------");    
+f.close();
 }
 
 String deviceToString(device Device) {
@@ -415,6 +418,14 @@ void displayDevice (int deviceIndex) {
   Serial.println("****************************");  
 }
 
+void swapDevices(int dev1, int dev2) {
+  device tempDevice;
+  memcpy(&tempDevice,&devices[dev1],sizeof(device));
+  memcpy(&devices[dev1], &devices[dev2], sizeof(device));
+  memcpy(&devices[dev2], &tempDevice, sizeof(device));
+  saveSettings();
+}
+
 int setDevice (String mac, String var, String val) {
 //Set variable (var) in device array for sensor (mac) to (val)
 //if (mac) doesn't exist in devices, it is added and (var) is set to (val)  
@@ -429,6 +440,36 @@ int setDevice (String mac, String var, String val) {
       memcpy(devices[deviceIndex].deviceName, char_array, str_len);
       return 0;        
     }
+    if (var == "moveDevice") {
+      if (val == "up") {
+
+        if (deviceIndex != 0) {
+          Serial.print("Move up: ");
+          Serial.print(deviceIndex);
+          Serial.print(" ");
+          Serial.println(deviceIndex-1);        
+          swapDevices(deviceIndex, deviceIndex-1);
+        }
+      }
+      if (val == "down") {
+        if (deviceIndex < getDeviceCount(DEVICE_ANY)-1) {
+          Serial.print("Move down: ");
+          Serial.print(deviceIndex);
+          Serial.print(" ");
+          Serial.println(deviceIndex+1);         
+          Serial.println(getDeviceCount(DEVICE_ANY));
+          swapDevices(deviceIndex, deviceIndex+1);
+        }
+      } 
+    }
+    if (var == "deleteDevice") {
+      Serial.print ("deleteDevice online =");
+      Serial.println (devices[deviceIndex].online);
+   
+      if (devices[deviceIndex].online == 0) devices[deviceIndex].deviceType = DEVICE_NONE;
+      saveSettings();
+      restoreSettings();     
+    }    
   }
 }
 
