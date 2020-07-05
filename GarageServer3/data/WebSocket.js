@@ -80,8 +80,7 @@ function buttonThree() {
 }
 
 function b1function(button) {
-
-	console.log('**** B1 Function ******');
+	console.log('**** Garage Button Pressed ******');
 	console.log ('Button.id = ' + button.id);
 	connection.send("#" + button.id);
 }
@@ -95,8 +94,7 @@ function saveSettings() {
 		connection.send(st);
 		console.log(st);
 	}
-	connection.send("S");
-	alert("Settings saved...");
+	connection.send('S');
 	console.log("Setting saved.");
 }
 
@@ -196,7 +194,7 @@ function deleteDoor(button) {
 	}
 }
 
-function tableCreate(rows) {
+function createSettingsTable(rows) {
 	json = JSON.parse(getJson());
 
 	//body reference
@@ -275,12 +273,12 @@ function tableCreate(rows) {
 
 function loadSettingsControls() {
 	console.log("**** loadSettingsControls ****")
+/*
 	var i;
-
   	var fieldset = document.createElement ("fieldset");
 
 	var legend = document.createElement ("legend");
-	legend.innerHTML = "Personal Information";
+	legend.innerHTML = "Garage Door Settings";
 	fieldset.appendChild (legend);
 
 	var autoClose = document.createElement("input");
@@ -291,20 +289,9 @@ function loadSettingsControls() {
 	attachTo.appendChild (fieldset);
 
     json = JSON.parse(getJson());
-
-    tableCreate(json.devices.length);
-/*
-	var container = document.getElementById("settingsControls"); //attach to settings area on html
-
-	for (i= 0; i< json.devices.length; i++) {
-		addDoorTextBox(json.devices[i].deviceName, "T" + json.devices[i].mac, container);
-		if (i < json.devices.length - 1) addSwapButton("Swap Text", "T" + json.devices[i].mac);
-//		document.getElementById("settingsControls").appendChild(document.createElement ("br"));
-//		document.getElementById("settingsControls").appendChild(document.createElement ("br"));
-//		document.getElementById("settingsControls").appendChild(document.createElement ("br"));
-
-	}
 */
+
+    createSettingsTable(json.devices.length);
 }
 
 setInterval(getJson, 2000);
