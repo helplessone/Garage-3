@@ -90,6 +90,7 @@ void setup() {
   startWebSocket();            // Start a WebSocket server
   startMDNS();                 // Start the mDNS responder
   startServer();               // Start a HTTP server with a file read handler and an upload handler
+  Udp.begin(UDP_PORT);         // Start listening for UDP
   delay(300);
   Serial.println("Mac Address = " + WiFi.macAddress());  
   restoreSettings();
@@ -523,6 +524,8 @@ void handleSet () {
       }
       devices[deviceIndex].timer = millis();
       devices[deviceIndex].online = 1;
+      for (int j=0; j<4;j++)
+        devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
     }  
     if (deviceIndex > -1) {
       if (server.argName(i) == "deviceType") {
@@ -684,13 +687,20 @@ void handleUDP() {
   // receive incoming UDP packets
   Serial.printf("Received %d bytes from %s, port %d\n", packetSize, Udp.remoteIP().toString().c_str(), Udp.remotePort());
   char incomingPacket[MAX_UDP_SIZE];
-  int len = Udp.read(incomingPacket, 255);
+  int len = Udp.read(incomingPacket, MAX_UDP_SIZE);
   if (len > 0)
   {
     incomingPacket[len] = 0;
   }
   Serial.printf("UDP packet contents: %s\n", incomingPacket);
   
+  if (strcmp(incomingPacket, LINK_MESSAGE)==0) { // Form a link to sendHeader
+    //TODO register device
+    Udp.beginPacket(Udp.remoteIP(),UDP_PORT);
+    Udp.write(LINKED_MESSAGE);
+    Udp.endPacket();
+  }
+
 }
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
 

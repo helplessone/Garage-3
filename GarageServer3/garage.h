@@ -3,6 +3,13 @@
     #define GARAGE_UDP;
     #define UDP_PORT 4204
     #define MAX_UDP_SIZE 255
+
+    #define UDP_HEADER "ESP8266_GARAGE_"
+
+    #define SEARCH_MESSAGE UDP_HEADER "SEARCH"
+    #define LINK_MESSAGE UDP_HEADER "LINK"
+    #define LINKED_MESSAGE UDP_HEADER "LINKED"
+    #define ACTION_MESSAGE UDP_HEADER "ACTION"
 #endif
 
 #ifndef DEVICE_TYPES

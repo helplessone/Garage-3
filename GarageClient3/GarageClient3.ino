@@ -20,6 +20,7 @@
 
 ESP8266WiFiMulti WiFiMulti;
 WiFiManager wifiManager;
+WiFiUDP Udp;
 
 #ifndef GARAGE_UDP
   #define UDP_PORT 4204
@@ -28,10 +29,12 @@ WiFiManager wifiManager;
 
 #ifndef DEVICE_TYPES
   #define DEVICE_NONE 0
+  #define DEVICE_ANY 99
   #define DEVICE_GARAGE 1
   #define DEVICE_THERMOMETOR 2
   #define DEVICE_RELAY 3
   #define DEVICE_IRSENSOR 4
+  #define DEVICE_WATER 5
 #endif
 
 #define DOORUP 4
@@ -40,6 +43,7 @@ WiFiManager wifiManager;
 
 bool doorUp, doorDown, startup = true;
 String macID = "";
+IPAddress serverIP;
 unsigned long heartbeat = 0;
 
 void setup() {
@@ -73,6 +77,8 @@ void setup() {
   WiFiMulti.addAP("Peterson", "7758499666");
   displayInfo();
 
+  Udp.begin(UDP_PORT);         // Start listening for UDP
+
 }
 
 void loop() {
@@ -91,7 +97,9 @@ void loop() {
 
     Serial.print("[HTTP] begin...\n");
 
-    st = "http://192.168.7.83/set?mac=" + macID;
+    st = "http://";
+    st += serverIP.toString();
+    st += "/set?mac=" + macID;
     st += '&';
     st += "deviceType=";
     st += SENSOR_TYPE;
@@ -124,8 +132,11 @@ void loop() {
       http.end();
     } else {
       Serial.printf("[HTTP} Unable to connect\n");
+      findServer();
+      delay(1000);
     }
   }
+  handleUDP();
   delay(200);
 }
 
@@ -142,4 +153,40 @@ void displayInfo() {
   st += "\nMAC ID: ";
   st += macID + "\n";
   Serial.println(st);
+}
+
+void handleUDP() {
+  int packetSize = Udp.parsePacket();
+  if (!packetSize) return;
+  
+  // receive incoming UDP packets
+  Serial.printf("Received %d bytes from %s, port %d\n", packetSize, Udp.remoteIP().toString().c_str(), Udp.remotePort());
+  char incomingPacket[MAX_UDP_SIZE];
+  int len = Udp.read(incomingPacket, MAX_UDP_SIZE);
+  if (len > 0)
+  {
+    incomingPacket[len] = 0;
+  }
+  Serial.printf("UDP packet contents: %s\n", incomingPacket);
+  
+  if (strcmp(incomingPacket, SEARCH_MESSAGE)==0) { // Someone is looking for me
+    Udp.beginPacket(Udp.remoteIP(),UDP_PORT);
+    Udp.write(LINK_MESSAGE);
+    Udp.endPacket();
+  }
+  if (strcmp(incomingPacket, LINKED_MESSAGE)==0) { // I have been linked to server 
+    serverIP = Udp.remoteIP();
+  }
+  if (strcmp(incomingPacket, ACTION_MESSAGE)==0) { //TODO handle potential actions here
+
+  }
+}
+
+void findServer() {
+  IPAddress scanAddress = WiFi.localIP();
+  scanAddress[3] = 255;
+  Serial.printf("Now broadcasting at IP %s, UDP port %d\n", scanAddress.toString().c_str(), UDP_PORT);
+  Udp.beginPacket(scanAddress, UDP_PORT);
+  Udp.write(LINK_MESSAGE);
+  Udp.endPacket();
 }
