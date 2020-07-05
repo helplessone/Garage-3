@@ -1,3 +1,5 @@
+#define ESP8266;
+#include "garage.h"
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
@@ -7,12 +9,14 @@
 #include <FS.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
+#include <WiFiUdp.h>               //For UDP 
 
 //ESP8266WiFiMulti wifiMulti;       // Create an instance of the ESP8266WiFiMulti class, called 'wifiMulti'
 
 ESP8266WebServer server(80);       // create a web server on port 80
 WebSocketsServer webSocket(81);    // create a websocket server on port 81
 WiFiManager wifiManager;
+WiFiUDP Udp;
 
 File fsUploadFile;                 // a File variable to temporarily store the received file
 
@@ -21,6 +25,11 @@ File fsUploadFile;                 // a File variable to temporarily store the r
 
 const char *OTAName = "ESP8266";           // A name and a password for the OTA service
 const char *OTAPassword = "esp8266";
+
+#ifndef GARAGE_UDP
+  #define UDP_PORT 4204
+  #define MAX_UDP_SIZE 255
+#endif
 
 #define LED_RED     15            // specify the pins with an RGB LED connected
 #define LED_GREEN   12
@@ -35,13 +44,15 @@ const char *OTAPassword = "esp8266";
 #define MAX_DEVICES 30
 #define JSON_BUF_SIZE 2048
 
-#define DEVICE_NONE 0
-#define DEVICE_ANY 99
-#define DEVICE_GARAGE 1
-#define DEVICE_THERMOMETOR 2
-#define DEVICE_RELAY 3
-#define DEVICE_IRSENSOR 4
-#define DEVICE_WATER 5
+#ifndef DEVICE_TYPES
+  #define DEVICE_NONE 0
+  #define DEVICE_ANY 99
+  #define DEVICE_GARAGE 1
+  #define DEVICE_THERMOMETOR 2
+  #define DEVICE_RELAY 3
+  #define DEVICE_IRSENSOR 4
+  #define DEVICE_WATER 5
+#endif
 
 #define SENSOR_TIMEOUT 20000
 
@@ -104,6 +115,7 @@ void loop() {
     }
   }
   ArduinoOTA.handle();                        // listen for OTA events
+  handleUDP();
 }
 
 int getDeviceCount (int deviceType) {
@@ -665,6 +677,21 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
   }  //end switch(Type)
 }
 
+void handleUDP() {
+  int packetSize = Udp.parsePacket();
+  if (!packetSize) return;
+  
+  // receive incoming UDP packets
+  Serial.printf("Received %d bytes from %s, port %d\n", packetSize, Udp.remoteIP().toString().c_str(), Udp.remotePort());
+  char incomingPacket[MAX_UDP_SIZE];
+  int len = Udp.read(incomingPacket, 255);
+  if (len > 0)
+  {
+    incomingPacket[len] = 0;
+  }
+  Serial.printf("UDP packet contents: %s\n", incomingPacket);
+  
+}
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
 
 String formatBytes(size_t bytes) { // convert sizes in bytes to KB and MB

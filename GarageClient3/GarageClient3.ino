@@ -4,7 +4,8 @@
     Created on: 24.05.2015
 
 */
-
+#define ESP8266;
+#include "../GarageServer3/garage.h"
 #include <Arduino.h>
 
 #include <ESP8266WiFi.h>
@@ -15,14 +16,23 @@
 
 #include <WiFiClient.h>
 
+#include <WiFiUdp.h>              //For UDP 
+
 ESP8266WiFiMulti WiFiMulti;
 WiFiManager wifiManager;
 
-#define DEVICE_NONE 0
-#define DEVICE_GARAGE 1
-#define DEVICE_THERMOMETOR 2
-#define DEVICE_RELAY 3
-#define DEVICE_IRSENSOR 4
+#ifndef GARAGE_UDP
+  #define UDP_PORT 4204
+  #define MAX_UDP_SIZE 255
+#endif
+
+#ifndef DEVICE_TYPES
+  #define DEVICE_NONE 0
+  #define DEVICE_GARAGE 1
+  #define DEVICE_THERMOMETOR 2
+  #define DEVICE_RELAY 3
+  #define DEVICE_IRSENSOR 4
+#endif
 
 #define DOORUP 4
 #define DOORDOWN 5
