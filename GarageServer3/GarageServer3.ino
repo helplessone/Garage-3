@@ -1,5 +1,6 @@
 #define ESP8266;
 #include "garage.h"
+#include <Arduino.h>
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
@@ -32,8 +33,9 @@ const char *OTAPassword = "esp8266";
 #endif
 
 #define LED_RED     15            // specify the pins with an RGB LED connected
-#define LED_GREEN   12
-#define LED_BLUE    13
+#define LASER       12            
+//#define LED_GREEN   12
+//#define LED_BLUE    13
 
 #define RED 0
 #define GREEN 1
@@ -80,9 +82,13 @@ void setup() {
 
   clearDevices();
  
-  pinMode(LED_RED, OUTPUT);    // the pins with LEDs connected are outputs
-  pinMode(LED_GREEN, OUTPUT);
-  pinMode(LED_BLUE, OUTPUT);
+  pinMode(LASER, OUTPUT);     // set LASER pin as output
+  digitalWrite(LASER, HIGH);  // turn off laser
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);    // turn off on-board LED
+  
+//  pinMode(LED_GREEN, OUTPUT);
+//  pinMode(LED_BLUE, OUTPUT);
 
   startWiFi();                 // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
   startOTA();                  // Start the OTA service
@@ -100,10 +106,13 @@ void setup() {
 
 bool rainbow = false;             // The rainbow effect is turned off on startup
 
-unsigned long prevMillis = millis();
+unsigned long heartbeatMillis = millis();
+unsigned long offlineTimer = millis();
 int hue = 0;
 
 void loop() {
+   bool alarm = false;
+   
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
   
@@ -115,6 +124,20 @@ void loop() {
       }
     }
   }
+  for (int i=0; i<MAX_DEVICES; i++) {
+    if (devices[i].deviceType == DEVICE_GARAGE) {
+      if (devices[i].sensor[0] != 1 || devices[i].sensor[1] != 0 || devices[i].online == 0) alarm = true;
+    }
+  } 
+  if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
+  
+  if (millis() - heartbeatMillis > 20000) {
+    digitalWrite (LED_BUILTIN, LOW);
+    delay (50);
+    digitalWrite (LED_BUILTIN, HIGH);
+    heartbeatMillis = millis();  
+  }
+  
   ArduinoOTA.handle();                        // listen for OTA events
   handleUDP();
 }
@@ -253,9 +276,9 @@ void startOTA() { // Start the OTA service
 
   ArduinoOTA.onStart([]() {
     Serial.println("Start");
-    digitalWrite(LED_RED, 0);    // turn off the LEDs
-    digitalWrite(LED_GREEN, 0);
-    digitalWrite(LED_BLUE, 0);
+//    digitalWrite(LED_RED, 0);    // turn off the LEDs
+//    digitalWrite(LED_GREEN, 0);
+//    digitalWrite(LED_BLUE, 0);
   });
   ArduinoOTA.onEnd([]() {
     Serial.println("\r\nEnd");
