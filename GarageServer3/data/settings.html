@@ -17,9 +17,20 @@
         <header>
             <h1>Settings</h1>
         </header>
+
+
         <p id="settingsControls">
         </p>
         <p>
+			<span class="dropdown">
+			  <button onclick="myFunction()" class="dropbtn">Time Zone</button>  <!-- class="dropbtn" -->
+			  <div id="myDropdown" class="dropdown-content">
+				<a href="#">Eastern</a>
+				<a href="#">Central</a>
+				<a href="#">Mountain</a>
+				<a href="#">Pacific</a>
+			  </div>
+			</span>
 			<button type="button" id="settings" class="settingsbutton" onclick="location.href='index.html'">Home</button>
 			<button type="button" id="settings" class="settingsbutton" onclick="saveSettings()">Save</button>
         </p>

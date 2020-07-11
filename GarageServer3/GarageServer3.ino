@@ -1,9 +1,10 @@
 #define ESP8266;
+#define ARDUINO 10808
 #include "garage.h"
-#include <Arduino.h>
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
@@ -11,6 +12,9 @@
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <WiFiUdp.h>               //For UDP 
+#include <time.h>                       // time() ctime()
+#include <sys/time.h>                   // struct timeval
+//#include <coredecls.h>                  // settimeofday_cb()
 
 //ESP8266WiFiMulti wifiMulti;       // Create an instance of the ESP8266WiFiMulti class, called 'wifiMulti'
 
@@ -26,10 +30,15 @@ File fsUploadFile;                 // a File variable to temporarily store the r
 
 const char *OTAName = "ESP8266";           // A name and a password for the OTA service
 const char *OTAPassword = "esp8266";
+const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
 
 #ifndef GARAGE_UDP
   #define UDP_PORT 4204
   #define MAX_UDP_SIZE 255
+#endif
+
+#ifndef LED_BUILTIN
+  #define LED_BUILTIN 2
 #endif
 
 #define LED_RED     15            // specify the pins with an RGB LED connected
@@ -50,7 +59,7 @@ const char *OTAPassword = "esp8266";
   #define DEVICE_NONE 0
   #define DEVICE_ANY 99
   #define DEVICE_GARAGE 1
-  #define DEVICE_THERMOMETOR 2
+  #define DEVICE_THERMOMETER 2
   #define DEVICE_RELAY 3
   #define DEVICE_IRSENSOR 4
   #define DEVICE_WATER 5
@@ -62,9 +71,16 @@ typedef struct {
   byte mac[6];
   byte ip[4];
   char deviceName[16];
+  unsigned long deviceTime;
+  // --- deviceTime packed in unsigned long as ---
+  // 5 bits 24 - 20 year (add 2000 to get year)
+  // 4 bits 19 - 16 month (1 - 12)
+  // 5 bits 15 - 11 day (1 - 31)
+  // 5 bits 10 - 6 hour (0 - 23) military time
+  // 6 bits 5 - 0 min (0 - 59)
   int deviceType;
-  int devicePosition;
   int sensor[2];
+  int sensorSwap;
   unsigned int timer;
   int online;
 } device;
@@ -72,6 +88,18 @@ typedef struct {
 device devices[MAX_DEVICES];
 
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
+
+//For realtime clock
+timeval tv;
+struct timezone tz;
+timespec tp;
+time_t tnow;
+extern "C" int clock_gettime(clockid_t unused, struct timespec *tp);
+
+unsigned long heartbeatMillis = millis();
+unsigned long getRealTimeMillis = millis();
+unsigned long offlineTimer = millis();
+int hue = 0;
 
 /*__________________________________________________________SETUP__________________________________________________________*/
 
@@ -87,9 +115,6 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);    // turn off on-board LED
   
-//  pinMode(LED_GREEN, OUTPUT);
-//  pinMode(LED_BLUE, OUTPUT);
-
   startWiFi();                 // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
   startOTA();                  // Start the OTA service
   startSPIFFS();               // Start the SPIFFS and list all contents
@@ -100,21 +125,35 @@ void setup() {
   delay(300);
   Serial.println("Mac Address = " + WiFi.macAddress());  
   restoreSettings();
+  
+  configTime(0, 0, "pool.ntp.org");
+  // set up TZ string to use a POSIX/gnu TZ string for local timezone
+  // TZ string information: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
+  // See Arduino Examples NTP-Clock-MinExample for RealTimeClock code
+  setenv("TZ", "PST+8PDT,M3.2.0/2,M11.1.0/2", 1);
+  tzset(); // save the TZ variable
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
 
-bool rainbow = false;             // The rainbow effect is turned off on startup
 
-unsigned long heartbeatMillis = millis();
-unsigned long offlineTimer = millis();
-int hue = 0;
 
 void loop() {
-   bool alarm = false;
+  
+  bool alarm = false;
    
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
+  
+//  char deviceTime[13];
+
+  unsigned long deviceTime;
+  if (millis() - getRealTimeMillis > 2000) {
+    getRealTimeMillis = millis();
+    deviceTime = getTime(); //((char *)&deviceTime);
+    Serial.print ("Device Time = ");
+    Serial.println(deviceTime);
+  }
   
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE){
@@ -126,7 +165,11 @@ void loop() {
   }
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType == DEVICE_GARAGE) {
-      if (devices[i].sensor[0] != 1 || devices[i].sensor[1] != 0 || devices[i].online == 0) alarm = true;
+      if (devices[i].sensorSwap == 0) {
+        if (devices[i].sensor[0] != 1 || devices[i].sensor[1] != 0 || devices[i].online == 0) alarm = true;
+      } else {
+        if (devices[i].sensor[0] != 0 || devices[i].sensor[1] != 1 || devices[i].online == 0) alarm = true;        
+      }
     }
   } 
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
@@ -141,6 +184,80 @@ void loop() {
   ArduinoOTA.handle();                        // listen for OTA events
   handleUDP();
 }
+
+String timeToString(unsigned long longtime) {
+  char buf[20];
+  String am = "am";
+
+  int hour = longtime >> 6 & 0x1f;
+  if (hour > 12) {
+    hour = hour - 12;
+    am = "pm";
+  }
+
+  sprintf (buf,"%d/%d/%d %d:%02d",(longtime >> 16) & 0xf,(longtime >> 11) & 0x1f,(longtime >> 20 & 0x1f),hour,longtime & 0x3f);
+  String st = buf + am;
+  return st;
+/* 
+   this code needs fixing...
+  String st = month[(longtime >> 16) & 0xf]
+  Serial.print ("year = ");
+  Serial.print ((longtime >> 20) + 2000);
+  Serial.print (" month = ");
+  Serial.print ((longtime >> 16) & 0xf); 
+  Serial.print (" day = ");
+  Serial.print ((longtime >> 11) & 0x1f);  
+  Serial.print (" hour = ");
+  Serial.print (longtime >> 6 & 0x1f);  
+  Serial.print (" min = ");
+  Serial.println (longtime & 0x3f);  
+*/
+}
+
+unsigned long timeToInt(struct tm *currtime){
+  return (((currtime->tm_year)-100) << 20) + ((currtime->tm_mon+1) << 16) + (currtime->tm_mday << 11) + (currtime->tm_hour << 6) + currtime->tm_min; 
+}
+
+unsigned long getTime() { //char *deviceTime) {
+  unsigned long longtime;
+  struct tm *currtime;
+  
+  gettimeofday(&tv, &tz);
+  clock_gettime(0, &tp); // also supported by esp8266 code
+  tnow = time(nullptr);
+  currtime = localtime(&tnow);
+//  sprintf (deviceTime,"%s %d %d:%02d",month[currtime->tm_mon],currtime->tm_mday,currtime->tm_hour,currtime->tm_min);
+  longtime = (((currtime->tm_year)-100) << 20) + ((currtime->tm_mon+1) << 16) + (currtime->tm_mday << 11) + (currtime->tm_hour << 6) + currtime->tm_min;
+
+  Serial.print ("longtime = ");
+  Serial.println (longtime);
+  
+  Serial.print ("year = ");
+  Serial.print (currtime->tm_year);
+  Serial.print (" month = ");
+  Serial.print (currtime->tm_mon+1); 
+  Serial.print (" day = ");
+  Serial.print (currtime->tm_mday);  
+  Serial.print (" hour = ");
+  Serial.print (currtime->tm_hour);
+  Serial.print (" min = ");
+  Serial.println (currtime->tm_min); 
+
+  
+  Serial.print ("year = ");
+  Serial.print ((longtime >> 20) & 0x1f + 2000);
+  Serial.print (" month = ");
+  Serial.print ((longtime >> 16) & 0xf); 
+  Serial.print (" day = ");
+  Serial.print ((longtime >> 11) & 0x1f);  
+  Serial.print (" hour = ");
+  Serial.print (longtime >> 6 & 0x1f);  
+  Serial.print (" min = ");
+  Serial.println (longtime & 0x3f);
+
+  return longtime;
+}
+
 
 int getDeviceCount (int deviceType) {
   int cnt = 0;
@@ -158,10 +275,11 @@ String getJSONString() {
       doc["devices"][i]["mac"] = macToString(devices[i].mac);      
       doc["devices"][i]["deviceType"] = devices[i].deviceType;
       doc["devices"][i]["deviceName"] = devices[i].deviceName;
-      doc["devices"][i]["devicePosition"] = devices[i].devicePosition;
+      doc["devices"][i]["deviceTime"] = devices[i].deviceTime;
       doc["devices"][i]["ip"] = ipToString(devices[i].ip);
       doc["devices"][i]["sensor0"] = devices[i].sensor[0];   
       doc["devices"][i]["sensor1"] = devices[i].sensor[1]; 
+      doc["devices"][i]["sensorSwap"] = devices[i].sensorSwap;
       doc["devices"][i]["timer"] = devices[i].timer; 
       doc["devices"][i]["online"] = devices[i].online; 
     } 
@@ -228,12 +346,12 @@ void restoreSettings() {
     else sscanf(field.c_str(),"%15s",Device.deviceName);
     Serial.printf("deviceName = |%s|\n",Device.deviceName);
     Serial.print ("Name length = ");
-    Serial.println (strlen(Device.deviceName));
+    Serial.println ((int)strlen(Device.deviceName));
     st.remove(0,st.indexOf('|')+1); //remove name
     Serial.println("After Remove Name: " + st);
 
-    sscanf(st.c_str(),"%d|%d|%d|%d|%lu|%d",&Device.deviceType,&Device.devicePosition,&Device.sensor[0],&Device.sensor[1],&Device.timer,&Device.online);
-    Serial.printf("Restored Device: |%s|%s|%s|%d|%d|%d|%d|%lu|%d|\n",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+    sscanf(st.c_str(),"%lu|%d|%d|%d|%d|%lu|%d",&Device.deviceTime,&Device.deviceType,&Device.sensor[0],&Device.sensor[1],&Device.sensorSwap,&Device.timer,&Device.online);
+    Serial.printf("Restored Device: |%s|%s|%s|%lu|%d|%d|%d|%d|%lu|%d|\n",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceTime,Device.deviceType,Device.sensor[0],Device.sensor[1],Device.sensorSwap,Device.timer,Device.online);
     memcpy(&(devices[deviceIndex]),&Device,sizeof(Device));
     deviceIndex++;    
     Serial.println("---------------------");    
@@ -245,14 +363,11 @@ f.close();
 String deviceToString(device Device) {
   String st;
   char buffer[200];
-  sprintf(buffer,"%s|%s|%s|%d|%d|%d|%d|%u|%d",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceType,Device.devicePosition,Device.sensor[0],Device.sensor[1],Device.timer,Device.online);
+  sprintf(buffer,"%s|%s|%s|%lu|%d|%d|%d|%d|%u|%d",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceTime,Device.deviceType,Device.sensor[0],Device.sensor[1],Device.sensorSwap,Device.timer,Device.online);
   st = buffer; 
   return st;
 }
 
-void stringToDevice (String st, device *Device) {
-  
-}
  
 /*__________________________________________________________SETUP_FUNCTIONS__________________________________________________________*/
 
@@ -440,6 +555,8 @@ void displayDevice (int deviceIndex) {
   Serial.println("mac: " + macToString(devices[deviceIndex].mac));
   Serial.print("Device Name: ");
   Serial.println(devices[deviceIndex].deviceName);
+  Serial.print("Device Time: ");
+  Serial.println(timeToString(devices[deviceIndex].deviceTime));
   Serial.println("IP: " + ipToString(devices[deviceIndex].ip));
   Serial.print("deviceType: ");
   Serial.println(devices[deviceIndex].deviceType);
@@ -447,6 +564,8 @@ void displayDevice (int deviceIndex) {
   Serial.println(devices[deviceIndex].sensor[0]);
   Serial.print("sensor 2: ");
   Serial.println(devices[deviceIndex].sensor[1]);
+  Serial.print("sensorSwap: ");
+  Serial.println(devices[deviceIndex].sensorSwap);
   Serial.print("timer: ");
   Serial.println(devices[deviceIndex].timer);  
   Serial.print("online: ");
@@ -474,6 +593,13 @@ int setDevice (String mac, String var, String val) {
       char char_array[16];
       val.toCharArray(char_array, str_len);
       memcpy(devices[deviceIndex].deviceName, char_array, str_len);
+      return 0;        
+    }
+    if (var == "sensorSwap") {
+      Serial.print("setDevice:sensorSwap = ");
+      Serial.println(val);
+      if (val == "TRUE") devices[deviceIndex].sensorSwap = 1; else devices[deviceIndex].sensorSwap = 0;
+      saveSettings();
       return 0;        
     }
     if (var == "moveDevice") {
@@ -555,11 +681,29 @@ void handleSet () {
         String st = server.arg(i);
         devices[deviceIndex].deviceType = st.toInt();
       }
-      if (server.argName(i) == "sensor0") devices[deviceIndex].sensor[0] = trueFalse(server.arg(i));
-      if (server.argName(i) == "sensor1") devices[deviceIndex].sensor[1] = trueFalse(server.arg(i));
-      if (server.argName(i) == "devicePosition") {
-        String st = server.arg(i);
-        devices[deviceIndex].devicePosition = st.toInt();
+      if (server.argName(i) == "sensor0") {
+        if (devices[deviceIndex].sensor[0] != trueFalse(server.arg(i))) {
+          devices[deviceIndex].deviceTime = getTime();         
+          devices[deviceIndex].sensor[0] = trueFalse(server.arg(i));
+          saveSettings();
+        }
+      }
+      if (server.argName(i) == "sensor1") {
+        if (devices[deviceIndex].sensor[1] != trueFalse(server.arg(i))) {
+          devices[deviceIndex].deviceTime = getTime();         
+          devices[deviceIndex].sensor[1] = trueFalse(server.arg(i));
+          saveSettings();
+        }       
+      }
+      if (server.argName(i) == "deviceTime") {
+        Serial.println ("****** ERROR handleSet 'deviceTime' ************");
+/*        
+        int str_len = server.arg(i).length() + 1;
+        if (str_len > 12) str_len = 12;
+        char char_array[13];
+        server.arg(i).toCharArray(char_array, str_len);
+        memcpy(devices[deviceIndex].deviceTime, char_array, str_len);
+*/       
       }
       if (server.argName(i) == "deviceName") {
         int str_len = server.arg(i).length() + 1;
@@ -580,7 +724,7 @@ void handleSet () {
   server.send(200, "text/plain", getJSONString());
   
   if (newDevice && deviceIndex > -1) displayDevice(deviceIndex);
-  for (int i = 0; i<2; i++) displayDevice(i);
+  for (int i = 0; i<getDeviceCount(DEVICE_ANY); i++) displayDevice(i);
 }
 
 void handleNotFound(){ // if the requested file or page doesn't exist, return a 404 not found error
@@ -630,7 +774,7 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
   } else if(upload.status == UPLOAD_FILE_END){
     if(fsUploadFile) {                                    // If the file was successfully created
       fsUploadFile.close();                               // Close the file again
-      Serial.print("handleFileUpload Size: "); Serial.println(upload.totalSize);
+      Serial.print("handleFileUpload Size: "); Serial.println((int)upload.totalSize);
       server.sendHeader("Location","/success.html");      // Redirect the client to the success page
       server.send(303);
     } else {
@@ -655,7 +799,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
     case WStype_CONNECTED: {              // if a new websocket connection is established
         IPAddress ip = webSocket.remoteIP(num);
         Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
-        rainbow = false;                  // Turn rainbow off when a new connection is established
       }
       break;
     case WStype_TEXT: {                    // if new text data is received
@@ -664,7 +807,15 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
         case '#': {     // button was pressed        
           Serial.print ("Key Pressed: ");
           String st = (char *)payload;
+          bool newDevice;
           Serial.println(st.substring(1,st.length()));
+          int index = getDeviceIndex(st.substring(1,st.length()),&newDevice);
+          if (!newDevice) {
+            IPAddress IP = devices[index].ip;
+            HTTPClient http;
+            http.begin("http://"+IP.toString()+"/");
+            http.POST(ACTION_MESSAGE);
+          }
         }
         break;
         case '*': {     //update variable
@@ -729,7 +880,7 @@ void handleUDP() {
 
 String formatBytes(size_t bytes) { // convert sizes in bytes to KB and MB
   if (bytes < 1024) {
-    return String(bytes) + "B";
+    return String((long)bytes) + "B";
   } else if (bytes < (1024 * 1024)) {
     return String(bytes / 1024.0) + "KB";
   } else if (bytes < (1024 * 1024 * 1024)) {

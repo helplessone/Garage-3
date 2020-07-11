@@ -1,26 +1,59 @@
-/**
-   BasicHTTPClient.ino
+//#define SENSOR_TYPE DEVICE_GARAGE
+#define SENSOR_TYPE DEVICE_THERMOMETER
 
-    Created on: 24.05.2015
-
-*/
 #define ESP8266;
-#include "../GarageServer3/garage.h"
-#include <Arduino.h>
+#include "garage.h"
 
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
+//#include <ESP8266WiFiMulti.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
 #include <ESP8266HTTPClient.h>
-
+#include <ESP8266WebServer.h>
 #include <WiFiClient.h>
-
 #include <WiFiUdp.h>              //For UDP 
 
-ESP8266WiFiMulti WiFiMulti;
+typedef struct {
+  int month;
+  int day;
+  int year;
+  int hour;
+  int minute;  
+} sensorTime;
+
+typedef struct {
+  bool sensor0;
+  bool sensor1;
+  bool swapSensors;
+  sensorTime deviceTime;
+} garageSensor;
+
+typedef struct {
+  int degreesC;
+  int degreesF;
+  int alarmHigh;
+  int alarmLow;
+  int minTemp;
+  int maxTemp;
+  sensorTime deviceTime;
+} temperatureSensor;
+
+#if SENSOR_TYPE == DEVICE_THERMOMETER
+  #include <OneWire.h>
+  #include <DallasTemperature.h>
+  // Data wire is plugged into digital pin 2 on the Arduino
+  #define ONE_WIRE_BUS 5 //D1 on NodeMCU
+  // Setup a oneWire instance to communicate with any OneWire device
+  OneWire oneWire(ONE_WIRE_BUS);
+  // Pass oneWire reference to DallasTemperature library
+  DallasTemperature sensors(&oneWire);
+#endif
+
+//ESP8266WiFiMulti WiFiMulti;
 WiFiManager wifiManager;
 WiFiUDP Udp;
+ESP8266WebServer server(80); 
+
 
 #ifndef GARAGE_UDP
   #define UDP_PORT 4204
@@ -31,15 +64,24 @@ WiFiUDP Udp;
   #define DEVICE_NONE 0
   #define DEVICE_ANY 99
   #define DEVICE_GARAGE 1
-  #define DEVICE_THERMOMETOR 2
+  #define DEVICE_THERMOMETER 2
   #define DEVICE_RELAY 3
   #define DEVICE_IRSENSOR 4
   #define DEVICE_WATER 5
 #endif
 
-#define DOORUP 4
-#define DOORDOWN 5
-#define SENSOR_TYPE DEVICE_GARAGE
+#ifndef LED_BUILTIN
+  #define LED_BUILTIN 2
+#endif
+
+#ifndef D0
+  #define D0 16
+#endif
+
+#define DOORUP 5      //Input: 0 if door is up (NodeMCU D1)
+#define DOORDOWN 4    //Input: 0 if door is down (NodeMCU D2)
+#define DOORBUTTON 14 //Output: set HIGH to activate garage door
+#define LED D0
 
 bool doorUp, doorDown, startup = true;
 String macID = "";
@@ -47,12 +89,22 @@ IPAddress serverIP;
 unsigned long heartbeat = 0;
 
 void setup() {
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED,HIGH);
 
+#if SENSOR_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
   pinMode(DOORDOWN, INPUT);
+  pinMode(DOORBUTTON, OUTPUT);
+  digitalWrite (DOORBUTTON, LOW);
 
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
+#endif 
+
+#if SENSOR_TYPE == SENSOR_THERMOMETER
+  sensors.begin();  // Start up the library
+#endif
 
   macID = WiFi.macAddress();
 
@@ -67,31 +119,31 @@ void setup() {
     Serial.printf("[SETUP] WAIT %d...\n", t);
     Serial.flush();
     delay(200);
-  }
-  
+  } 
 
-//  startWiFi();
-  
-  WiFi.mode(WIFI_STA);
-
-  WiFiMulti.addAP("Peterson", "7758499666");
+  startWiFi(); 
   displayInfo();
-
   Udp.begin(UDP_PORT);         // Start listening for UDP
+  startServer();
 
 }
 
 void loop() {
-  String st;
-  // wait for WiFi connection
+  handleStatusUpdate();  
+  handleUDP();
+  server.handleClient();
+  delay(1);
+}
 
+void handleStatusUpdate() {
+  String st;
   if (!(startup || (millis() - heartbeat > 10000) || (doorDown != digitalRead(DOORDOWN)) || (doorUp != digitalRead(DOORUP)))  ) return;
   displayInfo();
   heartbeat = millis();
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
   startup = false;
-  if ((WiFiMulti.run() == WL_CONNECTED)) {
+  if (true){
     WiFiClient client;
     HTTPClient http;
 
@@ -126,25 +178,30 @@ void loop() {
           Serial.println(payload);
         }
       } else {
-        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        Serial.printf("[HTTP] GET... failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
+        findServer();
       }
 
       http.end();
     } else {
-      Serial.printf("[HTTP} Unable to connect\n");
-      findServer();
-      delay(1000);
+      Serial.printf("[HTTP] Unable to connect\n");
     }
   }
-  handleUDP();
-  delay(200);
 }
 
 void startWiFi() {
+  digitalWrite(LED,LOW);
+#if SENSOR_TYPE == DEVICE_GARAGE   
   wifiManager.autoConnect("Garage Door Sensor");
+#endif
+#if SENSOR_TYPE == DEVICE_THERMOMETER   
+  wifiManager.autoConnect("Temperature Sensor");
+#endif
+  digitalWrite(LED,HIGH);
 }
 
 void displayInfo() {
+#if SENSOR_TYPE == DEVICE_GARAGE  
   String st;
   st = "Door Up = ";
   st += digitalRead(DOORUP);
@@ -153,6 +210,21 @@ void displayInfo() {
   st += "\nMAC ID: ";
   st += macID + "\n";
   Serial.println(st);
+#endif
+#if SENSOR_TYPE == DEVICE_THERMOMETER
+  // Send the command to get temperatures
+  sensors.requestTemperatures(); 
+  //print the temperature in Celsius
+  Serial.print("Temperature: ");
+  Serial.print(sensors.getTempCByIndex(0));
+  Serial.print(" "); //(char)0xb0);//shows degrees character
+  Serial.print("C  |  ");
+  
+  //print the temperature in Fahrenheit
+  Serial.print((sensors.getTempCByIndex(0) * 9.0) / 5.0 + 32.0);
+  Serial.print(" "); //(char)0xb0);//shows degrees character
+  Serial.println("F");
+#endif  
 }
 
 void handleUDP() {
@@ -189,4 +261,27 @@ void findServer() {
   Udp.beginPacket(scanAddress, UDP_PORT);
   Udp.write(LINK_MESSAGE);
   Udp.endPacket();
+}
+
+void startServer() {
+  server.on("/", HTTP_POST, []() {
+    for (int i = 0; i < server.args(); i++) {
+      Serial.println(server.arg(i));
+      if (server.arg(i).equals(ACTION_MESSAGE)) {
+        digitalWrite(LED,LOW);
+                
+#if SENSOR_TYPE == DEVICE_GARAGE        
+        digitalWrite (DOORBUTTON, HIGH); //activate door
+        delay(200);
+        digitalWrite (DOORBUTTON, LOW);
+#endif        
+        digitalWrite(LED,HIGH);
+
+        server.send(HTTP_CODE_OK);
+        return;
+      }
+      server.send(HTTP_CODE_BAD_REQUEST);
+    }
+  });
+  server.begin();
 }
