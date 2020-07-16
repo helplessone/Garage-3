@@ -1,6 +1,7 @@
 #define ESP8266;
 #define ARDUINO 10808
-#include "garage.h"
+#include <IotSensors.h>
+
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
@@ -43,8 +44,6 @@ const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 
 #define LED_RED     15            // specify the pins with an RGB LED connected
 #define LASER       12            
-//#define LED_GREEN   12
-//#define LED_BLUE    13
 
 #define RED 0
 #define GREEN 1
@@ -55,37 +54,11 @@ const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 #define MAX_DEVICES 30
 #define JSON_BUF_SIZE 2048
 
-#ifndef DEVICE_TYPES
-  #define DEVICE_NONE 0
-  #define DEVICE_ANY 99
-  #define DEVICE_GARAGE 1
-  #define DEVICE_THERMOMETER 2
-  #define DEVICE_RELAY 3
-  #define DEVICE_IRSENSOR 4
-  #define DEVICE_WATER 5
-#endif
-
 #define SENSOR_TIMEOUT 20000
 
-typedef struct {
-  byte mac[6];
-  byte ip[4];
-  char deviceName[16];
-  unsigned long deviceTime;
-  // --- deviceTime packed in unsigned long as ---
-  // 5 bits 24 - 20 year (add 2000 to get year)
-  // 4 bits 19 - 16 month (1 - 12)
-  // 5 bits 15 - 11 day (1 - 31)
-  // 5 bits 10 - 6 hour (0 - 23) military time
-  // 6 bits 5 - 0 min (0 - 59)
-  int deviceType;
-  int sensor[2];
-  int sensorSwap;
-  unsigned int timer;
-  int online;
-} device;
 
-device devices[MAX_DEVICES];
+
+Device devices[MAX_DEVICES];
 
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
 
@@ -289,7 +262,7 @@ String getJSONString() {
 }
 
 void clearDevices() {
-  memset(&devices, '\0', MAX_DEVICES * sizeof(device));   //clear devices array to 0's
+  memset(&devices, '\0', MAX_DEVICES * sizeof(Device));   //clear devices array to 0's
   for (int i=0; i<MAX_DEVICES; i++) devices[0].deviceType = DEVICE_NONE;  //and set deviceType to NONE 
 } 
 
@@ -309,7 +282,7 @@ void saveSettings() {
 }
 
 void restoreSettings() {
-  device Device;
+  Device device;
   String field;
   int deviceIndex = 0;
   byte mac[6];
@@ -328,31 +301,31 @@ void restoreSettings() {
     
     field = st.substring(0,st.indexOf('|'));
     Serial.println ("mac field = " + field);  
-    parseString(field.c_str(), ':', Device.mac, 6, 16); // Get mac address
-    Serial.printf("%x:%x:%x:%x:%x:%x\n",Device.mac[0],Device.mac[1],Device.mac[2],Device.mac[3],Device.mac[4],Device.mac[5]);
+    parseString(field.c_str(), ':', device.mac, 6, 16); // Get mac address
+    Serial.printf("%x:%x:%x:%x:%x:%x\n",device.mac[0],device.mac[1],device.mac[2],device.mac[3],device.mac[4],device.mac[5]);
     st.remove(0,st.indexOf('|')+1); //remove mac
 
     Serial.println("after remove: " + st);
 
     field = st.substring(0,st.indexOf('|'));  //get ip    
     Serial.println ("ip field = " + field);  
-    parseString(field.c_str(), '.', Device.ip, 4, 10); // Get mac address
-    Serial.printf("Device ip: %d.%d.%d.%d\n",Device.ip[0],Device.ip[1],Device.ip[2],Device.ip[3]);
+    parseString(field.c_str(), '.', device.ip, 4, 10); // Get mac address
+    Serial.printf("Device ip: %d.%d.%d.%d\n",device.ip[0],device.ip[1],device.ip[2],device.ip[3]);
     st.remove(0,st.indexOf('|')+1); //remove ip
 
     field = st.substring(0,st.indexOf('|'));  //get name
     Serial.println ("name field = |" + field + "|" + " length = " + field.length());
-    if (field.length() == 0) memset(Device.deviceName,'\0',sizeof(Device.deviceName));
-    else sscanf(field.c_str(),"%15s",Device.deviceName);
-    Serial.printf("deviceName = |%s|\n",Device.deviceName);
+    if (field.length() == 0) memset(device.deviceName,'\0',sizeof(device.deviceName));
+    else sscanf(field.c_str(),"%15s",device.deviceName);
+    Serial.printf("deviceName = |%s|\n",device.deviceName);
     Serial.print ("Name length = ");
-    Serial.println ((int)strlen(Device.deviceName));
+    Serial.println ((int)strlen(device.deviceName));
     st.remove(0,st.indexOf('|')+1); //remove name
     Serial.println("After Remove Name: " + st);
 
-    sscanf(st.c_str(),"%lu|%d|%d|%d|%d|%lu|%d",&Device.deviceTime,&Device.deviceType,&Device.sensor[0],&Device.sensor[1],&Device.sensorSwap,&Device.timer,&Device.online);
-    Serial.printf("Restored Device: |%s|%s|%s|%lu|%d|%d|%d|%d|%lu|%d|\n",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceTime,Device.deviceType,Device.sensor[0],Device.sensor[1],Device.sensorSwap,Device.timer,Device.online);
-    memcpy(&(devices[deviceIndex]),&Device,sizeof(Device));
+    sscanf(st.c_str(),"%lu|%d|%d|%d|%d|%lu|%d",&device.deviceTime,&device.deviceType,&device.sensor[0],&device.sensor[1],&device.sensorSwap,&device.timer,&device.online);
+    Serial.printf("Restored Device: |%s|%s|%s|%lu|%d|%d|%d|%d|%lu|%d|\n",macToString(device.mac).c_str(),ipToString(device.ip).c_str(),device.deviceName,device.deviceTime,device.deviceType,device.sensor[0],device.sensor[1],device.sensorSwap,device.timer,device.online);
+    memcpy(&(devices[deviceIndex]),&device,sizeof(Device));
     deviceIndex++;    
     Serial.println("---------------------");    
   }
@@ -360,10 +333,10 @@ void restoreSettings() {
 f.close();
 }
 
-String deviceToString(device Device) {
+String deviceToString(Device device) {
   String st;
   char buffer[200];
-  sprintf(buffer,"%s|%s|%s|%lu|%d|%d|%d|%d|%u|%d",macToString(Device.mac).c_str(),ipToString(Device.ip).c_str(),Device.deviceName,Device.deviceTime,Device.deviceType,Device.sensor[0],Device.sensor[1],Device.sensorSwap,Device.timer,Device.online);
+  sprintf(buffer,"%s|%s|%s|%lu|%d|%d|%d|%d|%u|%d",macToString(device.mac).c_str(),ipToString(device.ip).c_str(),device.deviceName,device.deviceTime,device.deviceType,device.sensor[0],device.sensor[1],device.sensorSwap,device.timer,device.online);
   st = buffer; 
   return st;
 }
@@ -574,10 +547,10 @@ void displayDevice (int deviceIndex) {
 }
 
 void swapDevices(int dev1, int dev2) {
-  device tempDevice;
-  memcpy(&tempDevice,&devices[dev1],sizeof(device));
-  memcpy(&devices[dev1], &devices[dev2], sizeof(device));
-  memcpy(&devices[dev2], &tempDevice, sizeof(device));
+  Device tempDevice;
+  memcpy(&tempDevice,&devices[dev1],sizeof(Device));
+  memcpy(&devices[dev1], &devices[dev2], sizeof(Device));
+  memcpy(&devices[dev2], &tempDevice, sizeof(Device));
   saveSettings();
 }
 

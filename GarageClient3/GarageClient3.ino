@@ -1,8 +1,8 @@
-//#define SENSOR_TYPE DEVICE_GARAGE
-#define SENSOR_TYPE DEVICE_THERMOMETER
+#define SENSOR_TYPE DEVICE_GARAGE
+//#define SENSOR_TYPE DEVICE_THERMOMETER
 
 #define ESP8266;
-#include "garage.h"
+#include <IotSensors.h>
 
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
@@ -14,11 +14,11 @@
 #include <WiFiUdp.h>              //For UDP 
 
 typedef struct {
-  int month;
-  int day;
-  int year;
-  int hour;
-  int minute;  
+  byte month;  // 1-12
+  byte day;    // 1-31
+  byte year;   // Year 2000 based
+  byte hour;   // 0 - 23
+  byte minute; // 0 - 59 
 } sensorTime;
 
 typedef struct {
@@ -34,7 +34,9 @@ typedef struct {
   int alarmHigh;
   int alarmLow;
   int minTemp;
+  sensorTime minTime;
   int maxTemp;
+  sensorTime maxTime;
   sensorTime deviceTime;
 } temperatureSensor;
 
@@ -60,6 +62,7 @@ ESP8266WebServer server(80);
   #define MAX_UDP_SIZE 255
 #endif
 
+/*
 #ifndef DEVICE_TYPES
   #define DEVICE_NONE 0
   #define DEVICE_ANY 99
@@ -69,6 +72,7 @@ ESP8266WebServer server(80);
   #define DEVICE_IRSENSOR 4
   #define DEVICE_WATER 5
 #endif
+*/
 
 #ifndef LED_BUILTIN
   #define LED_BUILTIN 2
@@ -163,7 +167,7 @@ void handleStatusUpdate() {
     if (!doorDown) st+= "TRUE"; else st += "FALSE";   //The sensors are reverse logic
     Serial.println(st);
     if (http.begin(client, st)) {  // HTTP
-      Serial.print("[HTTP] GET...\n");
+//      Serial.print("[HTTP] GET...\n");
       // start connection and send HTTP header
       int httpCode = http.GET();
 

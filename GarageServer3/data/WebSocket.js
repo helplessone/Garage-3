@@ -230,7 +230,7 @@ function createSettingsTable(rows) {
 				b1.style.height = '30px';
 				b1.style.backgroundColor = getDeviceColor(json.devices[j]);
 				b1.onclick = function() {swapSensors(this);};
-				if (json.devices[j].sensor0 === json.devices[j].sensor1) { //if door is open or closed alow sensor swap
+				if (json.devices[j].sensor0 === json.devices[j].sensor1) { //if door is open or closed allow sensor swap
 					b1.style.visibility = 'hidden';
 				}
 				cell.appendChild(b1);
