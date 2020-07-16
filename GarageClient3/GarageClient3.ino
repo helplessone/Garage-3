@@ -148,7 +148,7 @@ void handleStatusUpdate() {
   startup = false;
   HTTPClient http;
 
-  http.begin("http://"+serverIP+"/var.json"); //TODO change to proper URL
+  http.begin("http://"+serverIP+"/var.json"); 
   http.addHeader("Content-Type", "application/json");
 
   StaticJsonDocument<256> json;
