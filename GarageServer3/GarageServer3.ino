@@ -67,6 +67,10 @@ const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 
 #define SENSOR_TIMEOUT 20000
 
+#define STRSWITCH(STR)      char _x[16]; strcpy(_x, STR); if (false)
+#define STRCASE(STR)        } else if (strcmp(_x, STR)==0){
+#define STRDEFAULT          } else {
+
 typedef struct {
   byte mac[6];
   byte ip[4];
@@ -451,6 +455,49 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
   });                                     // go to 'handleFileUpload'
   
   server.on("/set", handleSet);  // GET request "set"
+  
+  server.on("/var.json", HTTP_POST, []() {
+    if (!server.hasArg("plain")){
+      server.send(200, "text/plain", "No body");
+      Serial.print("Bad Request");
+      return;
+    }
+    String data = server.arg("plain");
+    StaticJsonDocument<JSON_BUF_SIZE> doc;
+    deserializeJson(doc,data);
+    if (!doc.containsKey("mac")) {
+      server.send(400,"text/plain", "Malformed Request, No MAC Address");
+      return;
+    } 
+    bool newDevice;
+    int deviceIndex = getDeviceIndex(doc["mac"], &newDevice);
+    devices[deviceIndex].timer = millis();
+    devices[deviceIndex].online = 1;
+    for (int j=0; j<4;j++)
+      devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
+    for (JsonPair keyValue : doc.as<JsonObject>()) {
+      
+      STRSWITCH(keyValue.key().c_str())
+      {
+        STRCASE("deviceType")
+          devices[deviceIndex].deviceType = keyValue.value();
+        STRCASE("sensor0")
+          if (devices[deviceIndex].sensor[0] != trueFalse(keyValue.value())) {
+            devices[deviceIndex].deviceTime = getTime();         
+            devices[deviceIndex].sensor[0] = trueFalse(keyValue.value());
+            saveSettings();
+          }
+        STRCASE("sensor1")
+          if (devices[deviceIndex].sensor[1] != trueFalse(keyValue.value())) {
+            devices[deviceIndex].deviceTime = getTime();         
+            devices[deviceIndex].sensor[1] = trueFalse(keyValue.value());
+            saveSettings();
+          }
+      }
+    }
+    
+    server.send(200);
+  });
     
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
                                               // and check if the file exists
