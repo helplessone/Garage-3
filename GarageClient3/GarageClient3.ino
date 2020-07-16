@@ -1,5 +1,5 @@
-//#define SENSOR_TYPE DEVICE_GARAGE
-#define SENSOR_TYPE DEVICE_THERMOMETER
+#define SENSOR_TYPE DEVICE_GARAGE
+//#define SENSOR_TYPE DEVICE_THERMOMETER
 
 #define ESP8266;
 #define ARDUINO 10808
@@ -168,12 +168,12 @@ void handleStatusUpdate() {
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
-    Serial.printf("[HTTP] POST code: %d %s\n", httpCode);
+    Serial.printf("[HTTP] POST code: %d\n", httpCode);
 
     // file found at server
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
-      String payload = http.getString();
-      Serial.println(payload);
+      //String payload = http.getString();
+      //Serial.println(payload);
     }
   } else {
     Serial.printf("[HTTP] POST failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
