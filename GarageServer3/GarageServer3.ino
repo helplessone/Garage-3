@@ -56,7 +56,9 @@ const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 
 #define SENSOR_TIMEOUT 20000
 
-
+#define STRSWITCH(STR)      char _x[16]; strcpy(_x, STR); if (false)
+#define STRCASE(STR)        } else if (strcmp(_x, STR)==0){
+#define STRDEFAULT          } else {
 
 Device devices[MAX_DEVICES];
 
@@ -112,6 +114,7 @@ void setup() {
 
 
 void loop() {
+  delay(0);
   
   bool alarm = false;
    
@@ -120,13 +123,16 @@ void loop() {
   
 //  char deviceTime[13];
 
+/* The following was used to test RealTimeClock and time routines *****  
+ *  
   unsigned long deviceTime;
   if (millis() - getRealTimeMillis > 2000) {
     getRealTimeMillis = millis();
     deviceTime = getTime(); //((char *)&deviceTime);
     Serial.print ("Device Time = ");
-    Serial.println(deviceTime);
+    Serial.println(timeToString(deviceTime));
   }
+*/
   
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE){
@@ -145,6 +151,7 @@ void loop() {
       }
     }
   } 
+
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
   
   if (millis() - heartbeatMillis > 20000) {
@@ -201,7 +208,7 @@ unsigned long getTime() { //char *deviceTime) {
   currtime = localtime(&tnow);
 //  sprintf (deviceTime,"%s %d %d:%02d",month[currtime->tm_mon],currtime->tm_mday,currtime->tm_hour,currtime->tm_min);
   longtime = (((currtime->tm_year)-100) << 20) + ((currtime->tm_mon+1) << 16) + (currtime->tm_mday << 11) + (currtime->tm_hour << 6) + currtime->tm_min;
-
+/*
   Serial.print ("longtime = ");
   Serial.println (longtime);
   
@@ -226,7 +233,7 @@ unsigned long getTime() { //char *deviceTime) {
   Serial.print (" hour = ");
   Serial.print (longtime >> 6 & 0x1f);  
   Serial.print (" min = ");
-  Serial.println (longtime & 0x3f);
+  Serial.println (longtime & 0x3f); */
 
   return longtime;
 }
@@ -257,7 +264,7 @@ String getJSONString() {
       doc["devices"][i]["online"] = devices[i].online; 
     } 
   }
-  serializeJson(doc,st);
+  serializeJsonPretty(doc,st);
   return st;  
 }
 
@@ -423,7 +430,65 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
     server.send(200, "application/json", getJSONString()); 
   });                                     // go to 'handleFileUpload'
   
-  server.on("/set", handleSet);  // GET request "set"
+  //server.on("/set", handleSet);  // GET request "set"
+  
+  server.on("/var.json", HTTP_POST, []() {
+    Serial.println("\nPost");
+    if (!server.hasArg("plain")){
+      server.send(200, "text/plain", "No body");
+      Serial.print("Bad Request");
+      return;
+    }
+    StaticJsonDocument<JSON_BUF_SIZE/4> doc;
+    {
+      String data = server.arg("plain");
+      deserializeJson(doc,data);
+    }
+    if (!doc.containsKey("mac")) {
+      server.send(400,"text/plain", "Malformed Request, No MAC Address");
+      return;
+    } 
+    bool newDevice;
+    int deviceIndex = getDeviceIndex(doc["mac"], &newDevice);
+    devices[deviceIndex].timer = millis();
+    devices[deviceIndex].online = 1;
+    for (int j=0; j<4;j++)
+      devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
+    Serial.println("Json");
+    for (JsonPair keyValue : doc.as<JsonObject>()) {
+      delay(0);
+      
+      STRSWITCH(keyValue.key().c_str())
+      {
+        STRCASE("deviceType")
+          devices[deviceIndex].deviceType = keyValue.value();
+        STRCASE("sensor0")
+          if (devices[deviceIndex].sensor[0] != trueFalse(keyValue.value())) {
+            devices[deviceIndex].deviceTime = getTime();         
+            devices[deviceIndex].sensor[0] = trueFalse(keyValue.value());
+            Serial.print ("Device ");
+            Serial.print (deviceIndex);
+            Serial.print(": sensor0 changed at ");
+            Serial.println (timeToString(devices[deviceIndex].deviceTime));
+            saveSettings();
+         }
+        STRCASE("sensor1")
+          if (devices[deviceIndex].sensor[1] != trueFalse(keyValue.value())) {
+            devices[deviceIndex].deviceTime = getTime();         
+            devices[deviceIndex].sensor[1] = trueFalse(keyValue.value());
+            Serial.print ("Device ");
+            Serial.print (deviceIndex);
+            Serial.print(": sensor1 changed at ");
+            Serial.println (timeToString(devices[deviceIndex].deviceTime));
+            saveSettings();
+          }
+      }
+    }
+//    saveSettings();
+//    Serial.print(" Ok - startServer");
+    server.send(200,"text/plain","ok");
+    Serial.println("POST Ok");
+  });
     
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
                                               // and check if the file exists
@@ -508,9 +573,14 @@ int getDeviceIndex (String macString, bool *newDevice) {
   return DEVICE; 
 }
 
-int trueFalse(String st) {
-  if (st == "TRUE") return 1;
-  if (st == "FALSE") return 0;
+int trueFalse(String st) {  // return reverse logic
+  if (st == "TRUE") return 0;
+  if (st == "FALSE") return 1;
+  if (st == "true") return 0;
+  if (st == "false") return 1;
+  if (st == "1") return 0;
+  if (st == "0") return 1;
+  Serial.println(st);
   Serial.println ("**** Error: trueFALSE neither TRUE or FALSE ******");
   return 0;
 }

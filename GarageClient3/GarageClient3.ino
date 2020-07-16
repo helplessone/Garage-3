@@ -3,6 +3,7 @@
 
 #define ESP8266;
 #include <IotSensors.h>
+#define ARDUINO 10808
 
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
@@ -12,6 +13,7 @@
 #include <ESP8266WebServer.h>
 #include <WiFiClient.h>
 #include <WiFiUdp.h>              //For UDP 
+#include <ArduinoJson.h>
 
 typedef struct {
   byte month;  // 1-12
@@ -147,49 +149,38 @@ void handleStatusUpdate() {
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
   startup = false;
-  if (true){
-    WiFiClient client;
-    HTTPClient http;
+  HTTPClient http;
 
-    Serial.print("[HTTP] begin...\n");
+  http.begin("http://"+serverIP.toString()+"/var.json"); 
+  http.addHeader("Content-Type", "application/json");
 
-    st = "http://";
-    st += serverIP.toString();
-    st += "/set?mac=" + macID;
-    st += '&';
-    st += "deviceType=";
-    st += SENSOR_TYPE;
-    st += '&';
-    st += "sensor0=";
-    if (!doorUp) st+= "TRUE"; else st += "FALSE";   //The sensors are reverse logic
-    st += '&';
-    st += "sensor1=";
-    if (!doorDown) st+= "TRUE"; else st += "FALSE";   //The sensors are reverse logic
-    Serial.println(st);
-    if (http.begin(client, st)) {  // HTTP
-//      Serial.print("[HTTP] GET...\n");
-      // start connection and send HTTP header
-      int httpCode = http.GET();
+  StaticJsonDocument<256> json;
+  json["mac"] = macID;
+  json["deviceType"] = SENSOR_TYPE;
 
-      // httpCode will be negative on error
-      if (httpCode > 0) {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+  #if SENSOR_TYPE == DEVICE_GARAGE  
+    json["sensor0"] = doorUp;
+    json["sensor1"] = doorDown;
+  #endif
+  #if SENSOR_TYPE == DEVICE_THERMOMETER  
+    sensors.requestTemperatures(); 
+    json["temperature"] = sensors.getTempCByIndex(0);
+  #endif
 
-        // file found at server
-        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
-          String payload = http.getString();
-          Serial.println(payload);
-        }
-      } else {
-        Serial.printf("[HTTP] GET... failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
-        findServer();
-      }
+  serializeJsonPretty(json,st);
+  int httpCode = http.POST(st);
+  if (httpCode > 0) {
+    // HTTP header has been send and Server response header has been handled
+    Serial.printf("[HTTP] POST code: %d\n", httpCode);
 
-      http.end();
-    } else {
-      Serial.printf("[HTTP] Unable to connect\n");
+    // file found at server
+    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+      //String payload = http.getString();
+      //Serial.println(payload);
     }
+  } else {
+    Serial.printf("[HTTP] POST failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
+    findServer();
   }
 }
 

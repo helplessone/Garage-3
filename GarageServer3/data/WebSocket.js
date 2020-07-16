@@ -382,7 +382,10 @@ function getJson(){
 				var min = minute.toString();
 				while (min.length < 2) min = '0' + min;
 
-				button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + month + "/" + day + " " + hour + ":" + min + am + "</p>";
+				var deviceTime = month + "/" + day + " " + hour + ":" + min + am;
+				console.log("Device " + i + ": " + deviceTime);
+
+				button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
 			}
 			var swapbutton = document.getElementById('swap' + json.devices[i].mac);
 			if (swapbutton != null) {
