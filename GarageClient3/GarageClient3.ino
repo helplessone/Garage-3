@@ -1,5 +1,5 @@
-#define SENSOR_TYPE DEVICE_GARAGE
-//#define SENSOR_TYPE DEVICE_THERMOMETER
+//#define SENSOR_TYPE DEVICE_GARAGE
+#define SENSOR_TYPE DEVICE_THERMOMETER
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -51,6 +51,8 @@ typedef struct {
   OneWire oneWire(ONE_WIRE_BUS);
   // Pass oneWire reference to DallasTemperature library
   DallasTemperature sensors(&oneWire);
+  float currentTemp = 0.0;
+  bool tempRequest = false;
 #endif
 
 //ESP8266WiFiMulti WiFiMulti;
@@ -89,7 +91,11 @@ ESP8266WebServer server(80);
 #define DOORBUTTON 14 //Output: set HIGH to activate garage door
 #define LED D0
 
-bool doorUp, doorDown, startup = true;
+#if DEVICE_TYPE == DEVICE_GARAGE
+  int doorUp, doorDown;
+#endif
+
+bool startup = true;
 String macID = "";
 IPAddress serverIP;
 unsigned long heartbeat = 0;
@@ -143,11 +149,29 @@ void loop() {
 
 void handleStatusUpdate() {
   String st;
-  if (!(startup || (millis() - heartbeat > 10000) || (doorDown != digitalRead(DOORDOWN)) || (doorUp != digitalRead(DOORUP)))  ) return;
+#if SENSOR_TYPE == DEVICE_GARAGE 
+  if (!(startup || (millis() - heartbeat > 10000) || 
+                   (doorDown != digitalRead(DOORDOWN)) || 
+                   (doorUp != digitalRead(DOORUP)))  ) return;
+#endif
+#if SENSOR_TYPE == DEVICE_THERMOMETER 
+    sensors.requestTemperatures();
+    float f = sensors.getTempCByIndex(0);
+    if ((f < -120) || (f > 200)) f = currentTemp;
+    if (!(startup || tempRequest || (millis() - heartbeat > 10000) || 
+          (abs(currentTemp - f) > 1.0 ))) return;
+    if (abs(currentTemp - f) > 1.0 ) Serial.println("Forced temp update"); 
+    if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
+    tempRequest = false;                  
+    currentTemp = f; 
+#endif
+                   
   displayInfo();
   heartbeat = millis();
+#if SENSOR_TYPE == DEVICE_GARAGE  
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
+#endif  
   startup = false;
   HTTPClient http;
 
@@ -156,18 +180,23 @@ void handleStatusUpdate() {
 
   StaticJsonDocument<256> json;
   json["mac"] = macID;
-  json["deviceType"] = SENSOR_TYPE;
+  json["deviceType"] = SENSOR_TYPE;   /// *********************  HUH? Something wrong here ****************
 
   #if SENSOR_TYPE == DEVICE_GARAGE  
     json["sensor0"] = doorUp;
     json["sensor1"] = doorDown;
   #endif
   #if SENSOR_TYPE == DEVICE_THERMOMETER  
-    sensors.requestTemperatures(); 
-    json["temperature"] = sensors.getTempCByIndex(0);
+//    sensors.requestTemperatures();
+    int temp =  (int)(currentTemp * 100);
+    json["sensor0"] = temp;
+    Serial.print("sensor0 = ");
+    Serial.println(temp);
+    Serial.println(sensors.getTempCByIndex(0));
   #endif
 
   serializeJsonPretty(json,st);
+  Serial.println(st);
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
@@ -264,10 +293,14 @@ void startServer() {
       Serial.println(server.arg(i));
       if (server.arg(i).equals(ACTION_MESSAGE)) {
         digitalWrite(LED,LOW);
+#if SENSOR_TYPE == DEVICE_THERMOMETER
+        delay (200); //let the LED blink
+        tempRequest = true;
+#endif        
                 
 #if SENSOR_TYPE == DEVICE_GARAGE        
         digitalWrite (DOORBUTTON, HIGH); //activate door
-        delay(200);
+        delay(200);   //press door button for 200ms & blink LED
         digitalWrite (DOORBUTTON, LOW);
 #endif        
         digitalWrite(LED,HIGH);

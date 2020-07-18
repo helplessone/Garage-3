@@ -33,6 +33,10 @@ const char *OTAName = "ESP8266";           // A name and a password for the OTA 
 const char *OTAPassword = "esp8266";
 const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
 
+/******* SAVED GLOBAL VARIABLES **********/
+int timeOffset = 0;
+/*****************************************/
+
 #ifndef GARAGE_UDP
   #define UDP_PORT 4204
   #define MAX_UDP_SIZE 255
@@ -61,7 +65,6 @@ const char *month[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 #define STRDEFAULT          } else {
 
 Device devices[MAX_DEVICES];
-
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
 
 //For realtime clock
@@ -111,28 +114,16 @@ void setup() {
 
 /*__________________________________________________________LOOP__________________________________________________________*/
 
-
-
 void loop() {
+//  SPIFFS.remove("/devices.txt");
+//  delay(500);
+//  return;
   delay(0);
   
   bool alarm = false;
    
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
-  
-//  char deviceTime[13];
-
-/* The following was used to test RealTimeClock and time routines *****  
- *  
-  unsigned long deviceTime;
-  if (millis() - getRealTimeMillis > 2000) {
-    getRealTimeMillis = millis();
-    deviceTime = getTime(); //((char *)&deviceTime);
-    Serial.print ("Device Time = ");
-    Serial.println(timeToString(deviceTime));
-  }
-*/
   
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE){
@@ -154,7 +145,7 @@ void loop() {
 
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
   
-  if (millis() - heartbeatMillis > 20000) {
+  if (millis() - heartbeatMillis > 15000) {
     digitalWrite (LED_BUILTIN, LOW);
     delay (50);
     digitalWrite (LED_BUILTIN, HIGH);
@@ -194,20 +185,27 @@ String timeToString(unsigned long longtime) {
 */
 }
 
+/*
 unsigned long timeToInt(struct tm *currtime){
   return (((currtime->tm_year)-100) << 20) + ((currtime->tm_mon+1) << 16) + (currtime->tm_mday << 11) + (currtime->tm_hour << 6) + currtime->tm_min; 
 }
+*/
 
 unsigned long getTime() { //char *deviceTime) {
-  unsigned long longtime;
-  struct tm *currtime;
+//  unsigned long longtime;
+//  struct tm *currtime;
   
   gettimeofday(&tv, &tz);
+  Serial.print ("tv_sec = ");
+  Serial.println (tv.tv_sec);
+  return tv.tv_sec;
+/*  
   clock_gettime(0, &tp); // also supported by esp8266 code
   tnow = time(nullptr);
   currtime = localtime(&tnow);
 //  sprintf (deviceTime,"%s %d %d:%02d",month[currtime->tm_mon],currtime->tm_mday,currtime->tm_hour,currtime->tm_min);
-  longtime = (((currtime->tm_year)-100) << 20) + ((currtime->tm_mon+1) << 16) + (currtime->tm_mday << 11) + (currtime->tm_hour << 6) + currtime->tm_min;
+  longtime = ((((currtime->tm_year)-100)& 0x1f) << 20) + (((currtime->tm_mon+1) & 0xf) << 16) + ((currtime->tm_mday & 0x1f) << 11) + ((currtime->tm_hour & 0x1f) << 6) + (currtime->tm_min & 0x3f);
+*/
 /*
   Serial.print ("longtime = ");
   Serial.println (longtime);
@@ -225,7 +223,7 @@ unsigned long getTime() { //char *deviceTime) {
 
   
   Serial.print ("year = ");
-  Serial.print ((longtime >> 20) & 0x1f + 2000);
+  Serial.print (((longtime >> 20) & 0x1f) + 2000);
   Serial.print (" month = ");
   Serial.print ((longtime >> 16) & 0xf); 
   Serial.print (" day = ");
@@ -233,9 +231,9 @@ unsigned long getTime() { //char *deviceTime) {
   Serial.print (" hour = ");
   Serial.print (longtime >> 6 & 0x1f);  
   Serial.print (" min = ");
-  Serial.println (longtime & 0x3f); */
-
-  return longtime;
+  Serial.println (longtime & 0x3f); 
+*/
+//  return longtime;
 }
 
 
@@ -250,6 +248,8 @@ int getDeviceCount (int deviceType) {
 String getJSONString() {
   StaticJsonDocument<JSON_BUF_SIZE> doc;
   String st;
+  doc["global"]["currTime"] = getTime();
+  doc["global"]["timeOffset"] = timeOffset;
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE) {
       doc["devices"][i]["mac"] = macToString(devices[i].mac);      
@@ -265,7 +265,31 @@ String getJSONString() {
     } 
   }
   serializeJsonPretty(doc,st);
+//  Serial.println(st);
+  Serial.print ("timeOffset = ");
+  Serial.println (timeOffset);
   return st;  
+}
+
+void saveSettings1(){
+  String st = getJSONString();
+  File f = SPIFFS.open("/devices1.txt","w");
+  if (!f) return;
+  f.println(st);
+  Serial.println("---Save:");
+  Serial.println(st);
+  Serial.println("---End Save");
+  f.close();  
+}
+
+void restoreSettings1() {
+  File f = SPIFFS.open("/devices1.txt","r");
+  if (!f) return;
+  String st = f.readString();
+  Serial.println("---Restore:"); 
+  Serial.println(st);
+  Serial.println("---End Restore"); 
+  f.close(); 
 }
 
 void clearDevices() {
@@ -275,6 +299,9 @@ void clearDevices() {
 
 void saveSettings() {
   String st;
+//  saveSettings1();
+//  return;
+  
   File f = SPIFFS.open("/devices.txt","w");
   if (!f) return;
   for (int i=0; i<MAX_DEVICES; i++) {
@@ -295,6 +322,10 @@ void restoreSettings() {
   byte mac[6];
   char buffer[200];
   String st;
+//  clearDevices();
+//  restoreSettings1();
+//  return;
+  
   File f = SPIFFS.open("/devices.txt","r");
   if (!f) return;
   clearDevices();
@@ -322,8 +353,10 @@ void restoreSettings() {
 
     field = st.substring(0,st.indexOf('|'));  //get name
     Serial.println ("name field = |" + field + "|" + " length = " + field.length());
-    if (field.length() == 0) memset(device.deviceName,'\0',sizeof(device.deviceName));
-    else sscanf(field.c_str(),"%15s",device.deviceName);
+    field.toCharArray(device.deviceName,sizeof(device.deviceName));
+    
+//    if (field.length() == 0) memset(device.deviceName,'\0',sizeof(device.deviceName));
+//    else sscanf(field.c_str(),"%15s",device.deviceName);
     Serial.printf("deviceName = |%s|\n",device.deviceName);
     Serial.print ("Name length = ");
     Serial.println ((int)strlen(device.deviceName));
@@ -337,7 +370,7 @@ void restoreSettings() {
     Serial.println("---------------------");    
   }
   Serial.println("\n----------- end restoreSettings() ----------");    
-f.close();
+  f.close();
 }
 
 String deviceToString(Device device) {
@@ -352,7 +385,9 @@ String deviceToString(Device device) {
 /*__________________________________________________________SETUP_FUNCTIONS__________________________________________________________*/
 
 void startWiFi() { // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
+  digitalWrite(LED_BUILTIN,LOW);
   wifiManager.autoConnect("Garage Door Server");
+  digitalWrite(LED_BUILTIN,HIGH);
   
   if(WiFi.softAPgetStationNum() == 0) {      // If the ESP is connected to an AP
     Serial.print("Connected to ");
@@ -421,7 +456,7 @@ void startMDNS() { // Start the mDNS responder
 }
 
 void startServer() { // Start a HTTP server with a file read handler and an upload handler
-
+  
   server.on("/edit.html",  HTTP_POST, []() {  // If a POST request is sent to the /edit.html address,
     server.send(200, "text/plain", ""); 
   }, handleFileUpload);                       // go to 'handleFileUpload'
@@ -433,7 +468,7 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
   //server.on("/set", handleSet);  // GET request "set"
   
   server.on("/var.json", HTTP_POST, []() {
-    Serial.println("\nPost");
+//    Serial.println("\nPost");
     if (!server.hasArg("plain")){
       server.send(200, "text/plain", "No body");
       Serial.print("Bad Request");
@@ -454,40 +489,31 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
     devices[deviceIndex].online = 1;
     for (int j=0; j<4;j++)
       devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
-    Serial.println("Json");
+//    Serial.println("Json");
     for (JsonPair keyValue : doc.as<JsonObject>()) {
       delay(0);
       
+      int val = keyValue.value();
       STRSWITCH(keyValue.key().c_str())
       {
         STRCASE("deviceType")
           devices[deviceIndex].deviceType = keyValue.value();
         STRCASE("sensor0")
-          if (devices[deviceIndex].sensor[0] != trueFalse(keyValue.value())) {
+          if ((int)devices[deviceIndex].sensor[0] != (int)keyValue.value()) {
+            devices[deviceIndex].sensor[0] = keyValue.value();
             devices[deviceIndex].deviceTime = getTime();         
-            devices[deviceIndex].sensor[0] = trueFalse(keyValue.value());
-            Serial.print ("Device ");
-            Serial.print (deviceIndex);
-            Serial.print(": sensor0 changed at ");
-            Serial.println (timeToString(devices[deviceIndex].deviceTime));
             saveSettings();
          }
         STRCASE("sensor1")
-          if (devices[deviceIndex].sensor[1] != trueFalse(keyValue.value())) {
-            devices[deviceIndex].deviceTime = getTime();         
-            devices[deviceIndex].sensor[1] = trueFalse(keyValue.value());
-            Serial.print ("Device ");
-            Serial.print (deviceIndex);
-            Serial.print(": sensor1 changed at ");
-            Serial.println (timeToString(devices[deviceIndex].deviceTime));
+          if ((int)devices[deviceIndex].sensor[1] != (int)keyValue.value()) {
+            devices[deviceIndex].sensor[1] = keyValue.value();
+            devices[deviceIndex].deviceTime = getTime(); 
             saveSettings();
           }
       }
     }
-//    saveSettings();
-//    Serial.print(" Ok - startServer");
     server.send(200,"text/plain","ok");
-    Serial.println("POST Ok");
+//    Serial.println("POST Ok");
   });
     
   server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
@@ -573,18 +599,7 @@ int getDeviceIndex (String macString, bool *newDevice) {
   return DEVICE; 
 }
 
-int trueFalse(String st) {  // return reverse logic
-  if (st == "TRUE") return 0;
-  if (st == "FALSE") return 1;
-  if (st == "true") return 0;
-  if (st == "false") return 1;
-  if (st == "1") return 0;
-  if (st == "0") return 1;
-  Serial.println(st);
-  Serial.println ("**** Error: trueFALSE neither TRUE or FALSE ******");
-  return 0;
-}
-
+/*
 void displayDevice (int deviceIndex) {
   if (deviceIndex < 0 || deviceIndex >= MAX_DEVICES) {
     Serial.print("**** Invalid deviceIndex **** deviceIndex = ");
@@ -615,6 +630,7 @@ void displayDevice (int deviceIndex) {
   Serial.println(devices[deviceIndex].online);  
   Serial.println("****************************");  
 }
+*/
 
 void swapDevices(int dev1, int dev2) {
   Device tempDevice;
@@ -647,127 +663,20 @@ int setDevice (String mac, String var, String val) {
     }
     if (var == "moveDevice") {
       if (val == "up") {
-
-        if (deviceIndex != 0) {
-          Serial.print("Move up: ");
-          Serial.print(deviceIndex);
-          Serial.print(" ");
-          Serial.println(deviceIndex-1);        
-          swapDevices(deviceIndex, deviceIndex-1);
-        }
+        if (deviceIndex != 0) swapDevices(deviceIndex, deviceIndex-1);
       }
       if (val == "down") {
         if (deviceIndex < getDeviceCount(DEVICE_ANY)-1) {
-          Serial.print("Move down: ");
-          Serial.print(deviceIndex);
-          Serial.print(" ");
-          Serial.println(deviceIndex+1);         
-          Serial.println(getDeviceCount(DEVICE_ANY));
           swapDevices(deviceIndex, deviceIndex+1);
         }
       } 
     }
-    if (var == "deleteDevice") {
-      Serial.print ("deleteDevice online =");
-      Serial.println (devices[deviceIndex].online);
-   
+    if (var == "deleteDevice") { 
       if (devices[deviceIndex].online == 0) devices[deviceIndex].deviceType = DEVICE_NONE;
       saveSettings();
       restoreSettings();     
     }    
   }
-}
-
-void handleSet () {
-  String st;
-  String Up = "", Down = "";
-  String macString = "";
-  String ipString = "";
-  int deviceIndex = -1;
-  bool newDevice;
-  char deviceName[16];
-
-  String message = "Number of args received:";
-  message += server.args();
-  message += "\n";
-//  Serial.println(message);
-//  Serial.println(server.uri());
-  if (server.argName(0) == "save") {
-    saveSettings();
-    server.send(200, "text/plain", "");
-    return;
-
-  }
-  if (server.argName(0) == "restore") {
-    restoreSettings();
-    server.send(200, "text/plain", "");
-    return;    
-  }
-  for (int i=0; i<server.args(); i++) {
-    message += "Arg " + (String)i + " -> ";
-    message += server.argName(i) + ": ";
-    message += server.arg(i) + "\n"; 
-
-    if (server.argName(i) == "mac") {
-      macString = server.arg(i); 
-      deviceIndex = getDeviceIndex(macString, &newDevice);
-      if (newDevice) {
-        Serial.println ("NEW DEVICE!!!!!");
-      }
-      devices[deviceIndex].timer = millis();
-      devices[deviceIndex].online = 1;
-      for (int j=0; j<4;j++)
-        devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
-    }  
-    if (deviceIndex > -1) {
-      if (server.argName(i) == "deviceType") {
-        String st = server.arg(i);
-        devices[deviceIndex].deviceType = st.toInt();
-      }
-      if (server.argName(i) == "sensor0") {
-        if (devices[deviceIndex].sensor[0] != trueFalse(server.arg(i))) {
-          devices[deviceIndex].deviceTime = getTime();         
-          devices[deviceIndex].sensor[0] = trueFalse(server.arg(i));
-          saveSettings();
-        }
-      }
-      if (server.argName(i) == "sensor1") {
-        if (devices[deviceIndex].sensor[1] != trueFalse(server.arg(i))) {
-          devices[deviceIndex].deviceTime = getTime();         
-          devices[deviceIndex].sensor[1] = trueFalse(server.arg(i));
-          saveSettings();
-        }       
-      }
-      if (server.argName(i) == "deviceTime") {
-        Serial.println ("****** ERROR handleSet 'deviceTime' ************");
-/*        
-        int str_len = server.arg(i).length() + 1;
-        if (str_len > 12) str_len = 12;
-        char char_array[13];
-        server.arg(i).toCharArray(char_array, str_len);
-        memcpy(devices[deviceIndex].deviceTime, char_array, str_len);
-*/       
-      }
-      if (server.argName(i) == "deviceName") {
-        int str_len = server.arg(i).length() + 1;
-        if (str_len > 15) str_len = 15;
-        char char_array[16];
-        server.arg(i).toCharArray(char_array, str_len);
-        memcpy(devices[deviceIndex].deviceName, char_array, str_len);
-      }
-      if (server.argName(i) == "ip") {
-        String ipstr = server.arg(i);
-        byte ip[4];
-        parseString(ipstr.c_str(), '.', ip, 4, 10); // Get mac address
-        memcpy(devices[deviceIndex].ip,ip,4);
-      }
-    }
-  } //end for
- 
-  server.send(200, "text/plain", getJSONString());
-  
-  if (newDevice && deviceIndex > -1) displayDevice(deviceIndex);
-  for (int i = 0; i<getDeviceCount(DEVICE_ANY); i++) displayDevice(i);
 }
 
 void handleNotFound(){ // if the requested file or page doesn't exist, return a 404 not found error
@@ -865,27 +774,22 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           String mac="", var="", val="";
           String command = (char *)payload;
           parseCommand(command, &mac, &var, &val);
-          Serial.print("parseCommand:");
-          Serial.println((char *)payload);
-          Serial.println (mac + " " + var + " " + val);
+//          Serial.print("parseCommand:");
+//          Serial.println((char *)payload);
+//          Serial.println (mac + " " + var + " " + val);
           setDevice(mac, var, val);                        
         }
         break;
+        case '@': {     //update variable
+//          Serial.println("Received @");
+          switch (payload[1]) {
+            case '+': { timeOffset++; Serial.println("time inc"); } break;
+            case '-': { timeOffset--; Serial.println("time dec"); } break;
+          }                       
+        }
+        break;        
         default: {
           switch (payload[0]) {
-            case '1': {                      // Door 1 pressed
-                Serial.println("Door 1 pressed");             
-  //            webSocket.send(JSON.ToString());
-            }
-            break;
-            case '2': {                      // Door 2 pressed
-              Serial.println("Door 2 pressed");
-            }          
-            break;
-            case '3': {                      // Door 3 pressed
-              Serial.println("Door 3 pressed");
-            }
-            break;
             case 'S': {
                 saveSettings();
             }

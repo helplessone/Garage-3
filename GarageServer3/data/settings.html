@@ -22,8 +22,9 @@
         <p id="settingsControls">
         </p>
         <p>
+<!--
 			<span class="dropdown">
-			  <button onclick="myFunction()" class="dropbtn">Time Zone</button>  <!-- class="dropbtn" -->
+			  <button onclick="myFunction()" class="dropbtn">Time Zone</button>  <!-- class="dropbtn" --> <!--
 			  <div id="myDropdown" class="dropdown-content">
 				<a href="#">Eastern</a>
 				<a href="#">Central</a>
@@ -31,6 +32,11 @@
 				<a href="#">Pacific</a>
 			  </div>
 			</span>
+-->
+			<button type="button" id="decButton" class="incbutton" onclick="decTime()">-</button>
+			<button type="button" id="timeButton" class="timebutton" >Time</button>
+			<button type="button" id="incButton" class="incbutton" onclick="incTime()">+</button>
+			<br>
 			<button type="button" id="settings" class="settingsbutton" onclick="location.href='index.html'">Home</button>
 			<button type="button" id="settings" class="settingsbutton" onclick="saveSettings()">Save</button>
         </p>
