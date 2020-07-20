@@ -15,6 +15,7 @@
 #include <WiFiUdp.h>              //For UDP 
 #include <ArduinoJson.h>
 
+/*
 typedef struct {
   byte month;  // 1-12
   byte day;    // 1-31
@@ -22,25 +23,7 @@ typedef struct {
   byte hour;   // 0 - 23
   byte minute; // 0 - 59 
 } sensorTime;
-
-typedef struct {
-  bool sensor0;
-  bool sensor1;
-  bool swapSensors;
-  sensorTime deviceTime;
-} garageSensor;
-
-typedef struct {
-  int degreesC;
-  int degreesF;
-  int alarmHigh;
-  int alarmLow;
-  int minTemp;
-  sensorTime minTime;
-  int maxTemp;
-  sensorTime maxTime;
-  sensorTime deviceTime;
-} temperatureSensor;
+*/
 
 #if SENSOR_TYPE == DEVICE_THERMOMETER
   #include <OneWire.h>
@@ -65,18 +48,6 @@ ESP8266WebServer server(80);
   #define UDP_PORT 4204
   #define MAX_UDP_SIZE 255
 #endif
-
-/*
-#ifndef DEVICE_TYPES
-  #define DEVICE_NONE 0
-  #define DEVICE_ANY 99
-  #define DEVICE_GARAGE 1
-  #define DEVICE_THERMOMETER 2
-  #define DEVICE_RELAY 3
-  #define DEVICE_IRSENSOR 4
-  #define DEVICE_WATER 5
-#endif
-*/
 
 #ifndef LED_BUILTIN
   #define LED_BUILTIN 2
@@ -180,7 +151,7 @@ void handleStatusUpdate() {
 
   StaticJsonDocument<256> json;
   json["mac"] = macID;
-  json["deviceType"] = SENSOR_TYPE;   /// *********************  HUH? Something wrong here ****************
+  json["deviceType"] = SENSOR_TYPE;   
 
   #if SENSOR_TYPE == DEVICE_GARAGE  
     json["sensor0"] = doorUp;
@@ -189,8 +160,8 @@ void handleStatusUpdate() {
   #if SENSOR_TYPE == DEVICE_THERMOMETER  
 //    sensors.requestTemperatures();
     int temp =  (int)(currentTemp * 100);
-    json["sensor0"] = temp;
-    Serial.print("sensor0 = ");
+    json["temp"] = temp;
+    Serial.print("temp = ");
     Serial.println(temp);
     Serial.println(sensors.getTempCByIndex(0));
   #endif

@@ -37,6 +37,16 @@ td {
 
 tr {
     width: 100%;
+    border-bottom: 3px solid black;
+}
+
+.settingsTableRow {
+    width: 100%;
+    border-bottom: 3px solid red;
+}
+
+.settingsTableCell {
+    border-bottom: 3px solid red;
 }
 
 .pbutton1 {
