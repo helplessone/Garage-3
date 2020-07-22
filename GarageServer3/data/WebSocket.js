@@ -32,8 +32,6 @@ connection.onerror = function (error) {
     console.log("WebSocket Error ", error);
 };
 connection.onmessage = function (e) {
-//    console.log("Server: ", e.data);
-	console.log("RCVD Json");
 	processJson(e.data);
 };
 connection.onclose = function(){
@@ -59,39 +57,48 @@ function postSettings(json) {
 	postRequest.send(json);
 }
 
-function getSettings(device) {
-	newjson = {};
+function getDeviceJson(device) {
+	devicejson = {};
 
-	newjson['mac'] = device.mac;
-	newjson['deviceName'] = document.getElementById("DEVICENAME"+device.mac).value;
+	devicejson['mac'] = device.mac;
+	devicejson['deviceName'] = document.getElementById("DEVICENAME"+device.mac).value;
 	if (device.deviceType == DEVICE_GARAGE) {
-		newjson['closeDelay'] = parseInt(document.getElementById("CLOSEDELAY"+device.mac).value); 
-		newjson['closeTime'] = parseInt(document.getElementById("CLOSETIME"+device.mac).value); 
+		devicejson['closeDelay'] = parseInt(document.getElementById("CLOSEDELAY"+device.mac).value); 
+		
+		var value = document.getElementById("CLOSETIME"+device.mac).value
+
+		value = value.replace(/\D/g, '');
+		console.log("closeTime = " + parseInt(value));
+
+		devicejson['closeTime'] = parseInt(value); 
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
-		newjson['minTemp'] = parseInt(document.getElementById("MINTEMP"+device.mac).value); 
-		newjson['maxTemp'] = parseInt(document.getElementById("MAXTEMP"+device.mac).value); 
-		newjson['celcius'] = document.getElementById("CELCIUS"+device.mac).checked?1:0;
+		devicejson['minTemp'] = parseInt(document.getElementById("MINTEMP"+device.mac).value); 
+		devicejson['maxTemp'] = parseInt(document.getElementById("MAXTEMP"+device.mac).value); 
+		devicejson['celcius'] = document.getElementById("CELCIUS"+device.mac).checked?1:0;
 	}
-	return newjson;
+	return devicejson;
+}
+
+function getGlobalsJson() {
+	globalsjson = {};
+	globalsjson['timeOffset'] = timeOffset;
+	return globalsjson;
+}
+
+function saveGlobals() {
+	connection.send('^' + JSON.stringify(getGlobalsJson()));	
 }
 
 function saveSettings() {
 	var i;
 	console.log("***** saveSettings() ******");
 	for (i= 0; i< json.devices.length; i++) {
-/*		
-		var value = document.getElementById("DEVICENAME"+json.devices[i].mac).value;
-		var st = "*" + json.devices[i].mac + "?deviceName=" + value;
+		var st = '^' + JSON.stringify(getDeviceJson(json.devices[i]));
+		console.log(st);	
 		connection.send(st);
-		console.log(st);
-*/		
-		var newJson = getSettings(json.devices[i]);
-//		postSettings(JSON.stringify(newJson));
-		console.log(newjson);
-		connection.send('^' + JSON.stringify(newJson));
 	}
-	connection.send('S');
+	saveGlobals();
 	console.log("Setting saved.");
 }
 
@@ -131,13 +138,13 @@ function addDoorTextBox (device, container) {
 		closeDelay.style.width = '15%';
 		closeDelay.style.height = '20px';
 		closeDelay.style.marginTop = '4px';
-		closeDelay.style.marginLeft = '2px';
+		closeDelay.style.marginLeft = '5px';
 		closeDelay.style.marginRight = '5px';
 		closeDelay.style.textAlign = 'center';
 		closeDelay.style.borderRadius = '10px';
 		closeDelay.style.color = 'black';
 		closeDelay.style.fontSize = '20px';
-		closeDelay.maxLength = 4;
+		closeDelay.maxLength = 3;
 		closeDelay.id = 'CLOSEDELAY' + device.mac;
 		closeDelay.setAttribute('mac',device.mac);
 		closeDelay.value = device.closeDelay;
@@ -146,21 +153,22 @@ function addDoorTextBox (device, container) {
 		closeTime.style.width = '20%';
 		closeTime.style.height = '20px';
 		closeTime.style.marginTop = '4px';
-		closeTime.style.marginLeft = '2px';
-		closeTime.style.marginRight = '0px';
+		closeTime.style.marginLeft = '5px';
+		closeTime.style.marginRight = '5px';
 		closeTime.style.marginBottom = '3px';
 		closeTime.style.textAlign = 'center';
 		closeTime.style.borderRadius = '10px';
 		closeTime.style.color = 'black';
 		closeTime.style.fontSize = '20px';
-		closeTime.maxLength = 4;
+		closeTime.maxLength = 5;
 		closeTime.id = 'CLOSETIME' + device.mac;
 		closeTime.setAttribute('mac',device.mac);
 		closeTime.value = device.closeTime;
 		
-		var t1 = document.createTextNode("AUTO CLOSE AFTER ");
-		var t2 = document.createTextNode("MIN ");
-		var t3 = document.createTextNode("AUTO CLOSE AT ");
+		var t1 = document.createTextNode("AUTO CLOSE AFTER");
+		var t2 = document.createTextNode("MINUTES");
+		var t3 = document.createTextNode("AUTO CLOSE AT");
+		var t4 = document.createTextNode("(9pm=2100)");
 	}	
 
 	
@@ -237,6 +245,7 @@ function addDoorTextBox (device, container) {
 		container.appendChild(br);
 		container.appendChild(t3);
 		container.appendChild(closeTime);
+		container.appendChild(t4);
 
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
@@ -265,40 +274,39 @@ function loadMainControls() {
 	json = getJson();	//reload json to get button text
 }
 
-function timeString(time){
-//	console.log("timeOffset = " + timeOffset);
-	var timestamp = (time + (timeOffset * 3600)) * 1000; //convert seconds to mSec + offset
-	var date = new Date(timestamp);
-	
-	var month = (date.getMonth()+1).toString();
-	var day = date.getDate().toString();
-	var hour = date.getHours().toString();
-	var minutes = date.getMinutes().toString();
+function timeString(time) {
+
+	var currDate = new Date(time * 1000);
+	currDate.setHours(currDate.getHours() + timeOffset);
+
+	var month = (currDate.getUTCMonth()+1).toString();
+	var day = currDate.getUTCDate().toString();
+	var hour = currDate.getUTCHours().toString();
+	var minutes = currDate.getUTCMinutes().toString();
 	while (minutes.length < 2) minutes = '0' + minutes;
+	while (hour.length < 2) hour = '0' + hour;
 
 	var formattedTime = month + '/' + day + ' ' + hour + ':' + minutes;
-	return formattedTime;
 
-	return "";
+	return formattedTime;
 }
 
 function displayTime(){
 	var b = document.getElementById('timeButton');
 	json = getJson();
-	console.log("currTime = " + json.global.currTime);
 	b.innerHTML = timeString(json.global.currTime);
 }
 
 function incTime(){
 	timeOffset++;
-	connection.send("@+");
+	saveGlobals();
 	displayTime();
 
 }
 
 function decTime(){
 	timeOffset--;
-	connection.send("@-");
+	saveGlobals();
 	displayTime();
 }
 
@@ -356,14 +364,14 @@ function swapSensors(button){
 	if (i < json.devices.length) {
 		if (json.devices[i].sensor0 !== json.devices[i].sensor1) { // you can only swap when open or closed
 			console.log("sensorSwap = " + json.devices[i].sensorSwap);
-			if (json.devices[i].sensorSwap === 0) value = 'TRUE'; else value = 'FALSE';
-			var st = "*" + json.devices[i].mac + "?sensorSwap=" + value;
+			if (json.devices[i].sensorSwap === 0) value = 1; else value = 0;
 
-			connection.send(st);
-			console.log(st);
-			connection.send('S');
-			console.log("Setting saved.");
-			location.reload();
+			devicejson = {};
+			devicejson['mac'] = json.devices[i].mac;
+			devicejson['sensorSwap'] = value;	
+			var st = JSON.stringify(devicejson);
+			console.log("sensorSwap json = " + st);
+			connection.send('^' + st);
 		}
 	}
 }
@@ -388,7 +396,7 @@ function createSettingsTable(rows) {
 		var row = document.createElement("tr");
 		row.className = 'settingsTableRow';
 
-		for (var i = 0; i < 4; i++) {
+		for (var i = 0; i < 3; i++) {
 			// create element <td> and text node
 			//Make text node the contents of <td> element
 			// put <td> at end of the table row
@@ -414,9 +422,7 @@ function createSettingsTable(rows) {
 					}
 					cell.appendChild(b1);
 				}
-			}
-			if (i === 2) { //delete button
-				cell.style.width = '50px';
+
 				if (json.devices[j].online === 0) { // if door if offline, allow delete
 					var b1 = document.createElement('img');
 					b1.setAttribute("mac",json.devices[j].mac);
@@ -424,10 +430,12 @@ function createSettingsTable(rows) {
 					b1.style.width = '30px';
 					b1.style.height = '30px';
 					b1.onclick = function() {deleteDoor(this);};
+					cell.appendChild(br);
 					cell.appendChild(b1);
-				}
+				}				
 			}
-			if (i === 3) { //move buttons
+			
+			if (i === 2) { //move buttons
 				cell.style.width = '50px';
 				var b1 = document.createElement('img');
 				b1.setAttribute("mac",json.devices[j].mac);
@@ -469,12 +477,14 @@ function createSettingsTable(rows) {
 	b1.style.height = '30px';
 	b1.style.vericalAlign = 'bottom';
 
+/*
 	var s = document.createElement('span');
 	s.style.fontSize = '18px';
 	var txt = document.createTextNode(" = Switch Door Position");
 	s.appendChild(b1);
 	s.appendChild(txt);
 	container.appendChild(s);
+*/	
 }
 
 function loadSettingsControls() {
@@ -519,73 +529,23 @@ function getJson(){
     var Httpreq = new XMLHttpRequest(); // a new request
     Httpreq.open("GET","/var.json",false);
     Httpreq.send(null);
-//    console.log("Response " + Httpreq.responseText);
 
-    if (Httpreq.responseText !== "null") {
-//		console.log(Httpreq.responseText);
-		json = JSON.parse(Httpreq.responseText);
-		
-		currTime = json.global.currTime;
-		timeOffset = json.global.timeOffset;
-
-		var i;
-		for (i=0; i<json.devices.length; i++) {
-			var button = document.getElementById(json.devices[i].mac);
-			if (button != null) {
-				if (json.devices[i].deviceType == DEVICE_GARAGE) {
-					button.style.backgroundColor = getDeviceColor(json.devices[i]);
-					var st;
-					var color = getDeviceColor(json.devices[i]);
-					switch (color) {
-						case RED: st = "Open since "; break;
-						case GREEN: st = "Closed since "; break;
-						case YELLOW: st = "Partially Open since "; break;
-						case PURPLE: st = "Invalid State since "; break;
-						default: st = "Offline since ";
-					}
-					var deviceTime = timeString(json.devices[i].deviceTime);
-
-					button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
-				}
-				if (json.devices[i].deviceType == DEVICE_THERMOMETER) {
-					var t;
-
-					if (json.devices[i].celcius == true) t = Math.round(json.devices[i].temp / 100); else t = (Math.round((json.devices[i].temp / 100) * 9/5) + 32);
-					
-					if ((t > json.devices[i].maxTemp) && (json.devices[i].maxTemp != 0)) button.style.backgroundColor = RED;
-					else if ((t < json.devices[i].minTemp) && (json.devices[i].minTemp != 0)) button.style.backgroundColor = BLUE;
-					else if (json.devices[i].online == 0) button.style.backgroundColor = YELLOW;
-					else button.style.backgroundColor = GREEN;
-
-
-					var st = "Last Read ";
-					var deviceTime = timeString(json.devices[i].deviceTime);
-					var degC = Math.round(json.devices[i].temp / 100) + "\xB0 C";
-					var degF = Math.round( ((json.devices[i].temp / 100) * 9/5) + 32) + "\xB0 F";
-					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degC + ' / ' + degF + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
-					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
-				}
-			}
-			var swapbutton = document.getElementById('swap' + json.devices[i].mac);
-			if (swapbutton != null) {
-				if (json.devices[i].sensor0 === json.devices[i].sensor1) { //if door is open or closed alow sensor swap
-					swapbutton.style.visibility = 'hidden';
-				} else swapbutton.style.visibility = 'visible';
-				swapbutton.style.backgroundColor = getDeviceColor(json.devices[i]);
-			}
-		}
+	if (Httpreq.responseText !== "null") {
+		processJson(Httpreq.responseText);
+		json = JSON.parse(Httpreq.responseText)
 		return json;
 	}
-    return;
+	return;
 }
+
 function processJson(jsonString){
 
     if (jsonString !== "null") {
-//		console.log(Httpreq.responseText);
 		json = JSON.parse(jsonString);
-		
-		currTime = json.global.currTime;
+
 		timeOffset = json.global.timeOffset;
+		var doc = document.getElementById('timeButton');
+		if (doc !== null) doc.innerHTML = timeString(json.global.currTime);
 
 		var i;
 		for (i=0; i<json.devices.length; i++) {
