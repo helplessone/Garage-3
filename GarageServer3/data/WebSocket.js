@@ -1,6 +1,8 @@
 var rainbowEnable = false;
 var connection = new WebSocket('ws://'+location.hostname+':81/', ['arduino']);
-var json = getJson();
+//var json = getJson();
+//var pushedJson;
+//var bloadControls = false;
 
 var YELLOW = "#ffd11a";
 var RED = "#ff0000";
@@ -19,6 +21,7 @@ var OFFLINE_BLUE = "#8080ff"
 
 var DEVICE_GARAGE = '1';
 var DEVICE_THERMOMETER = '2';
+var DEVICE_LATCH = '4';
 
 /********* GLOBAL VARIBLES ************/
 var timeOffset = 0;
@@ -32,6 +35,14 @@ connection.onerror = function (error) {
     console.log("WebSocket Error ", error);
 };
 connection.onmessage = function (e) {
+	console.log ("Received pushed json");
+/*	
+	if (bloadControls === true) {
+		loadControls();
+		bloadControls = false;
+	}
+	pushedJson = JSON.parse(e.data);
+*/	
 	processJson(e.data);
 };
 connection.onclose = function(){
@@ -41,20 +52,9 @@ connection.onclose = function(){
 // setInterval(getJson, 200);
 
 function mainButtonPressed(button) {
-	console.log('**** Button Pressed ******');
-	console.log ('Button.id = ' + button.id + ' mac = ' + button.getAttribute('mac'));
-	connection.send("#" + button.id);
-}
-
-function postSettings(json) {
-	var url = "http://192.168.7.83/var.json";
-	var params = json;
-	var postRequest = new XMLHttpRequest();
-	postRequest.open("POST", url, true);
-
-	//Send the proper header information along with the request
-	postRequest.setRequestHeader("Content-type", "application/x-www-form-urlencoded"); 
-	postRequest.send(json);
+	console.log('**** Button Pressed ******')
+	console.log ('Button.id = ' + button.id + ' mac = ' + button.getAttribute('mac'))
+	connection.send("#" + button.id)
 }
 
 function getDeviceJson(device) {
@@ -110,8 +110,8 @@ function deleteSettings() {
 function addDoorButton (deviceName, mac) {
 
 	var b1 = document.createElement("BUTTON"); // Create Button
-	if (json.devices.length > 4) b1.style.width = "45%"; else b1.style.width = "95%";
-	b1.style.height = "80px";
+	if (json.devices.length > 4) b1.style.width = "95%"; else b1.style.width = "95%";
+	b1.style.height = "80px"; //was 80
 	b1.style.margin = "5px";
 	b1.style.background = "blue";
 	b1.style.borderRadius = "10px";
@@ -223,7 +223,8 @@ function addDoorTextBox (device, container) {
 
 	var tb = document.createElement('input'); // Create Button
 	if (device.deviceType == DEVICE_GARAGE) tb.style.width = '95%';
-	else if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = '95%';
+	if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = '95%';
+	if (device.deviceType == DEVICE_LATCH) tb.style.width = '95%';
 
 	tb.style.height = '40px';
 	tb.style.marginTop = '2px';
@@ -246,7 +247,6 @@ function addDoorTextBox (device, container) {
 		container.appendChild(t3);
 		container.appendChild(closeTime);
 		container.appendChild(t4);
-
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		container.appendChild(mn);		
@@ -256,7 +256,6 @@ function addDoorTextBox (device, container) {
 		container.appendChild(cel);
 		container.appendChild(celcius);
 	}
-
 }
 
 function buttonPress(image){
@@ -265,13 +264,21 @@ function buttonPress(image){
 
 function loadMainControls() {
 	var i;
+	console.log("loadControls()")
 	var json = getJson();
+	console.log(json);
+	console.log("****** loadMainControls() *************");
+	console.log(json);
 	if (json !== "null") {
 		for (i= 0; i< json.devices.length; i++) {
 			addDoorButton(json.devices[i].deviceName, json.devices[i].mac);
 		}
 	}
 	json = getJson();	//reload json to get button text
+}
+
+function loadMainControls2() {
+	bloadControls = true;
 }
 
 function timeString(time) {
@@ -362,18 +369,30 @@ function swapSensors(button){
 		}
 	}
 	if (i < json.devices.length) {
-		if (json.devices[i].sensor0 !== json.devices[i].sensor1) { // you can only swap when open or closed
-			console.log("sensorSwap = " + json.devices[i].sensorSwap);
-			if (json.devices[i].sensorSwap === 0) value = 1; else value = 0;
+		if (json.devices[i].deviceType == DEVICE_GARAGE) {
+			if (json.devices[i].sensor0 !== json.devices[i].sensor1) { // you can only swap when open or closed
+				console.log("sensorSwap = " + json.devices[i].sensorSwap);
+				if (json.devices[i].sensorSwap === 0) value = 1; else value = 0;
 
-			devicejson = {};
-			devicejson['mac'] = json.devices[i].mac;
-			devicejson['sensorSwap'] = value;	
-			var st = JSON.stringify(devicejson);
-			console.log("sensorSwap json = " + st);
-			connection.send('^' + st);
+				devicejson = {};
+				devicejson['mac'] = json.devices[i].mac;
+				devicejson['sensorSwap'] = value;	
+				var st = JSON.stringify(devicejson);
+				console.log("sensorSwap json = " + st);
+				connection.send('^' + st);
+			}
 		}
-	}
+		if (json.devices[i].deviceType == DEVICE_LATCH) {
+				devicejson = {};
+				devicejson['mac'] = json.devices[i].mac;
+				devicejson['switchReverse'] = 0;	//Value doesn't matter, arduino just inverts switchReverse
+				var st = JSON.stringify(devicejson);
+				console.log("switchReverse json = " + st);
+				connection.send('^' + st);		//send update to arduino server
+//				json = getJson();
+//				connection.send("#" + json.devices[i].mac);  //press button to reset latch							
+		}
+	}	
 }
 
 function createSettingsTable(rows) {
@@ -407,7 +426,7 @@ function createSettingsTable(rows) {
 				addDoorTextBox(json.devices[j], cell);
 			}
 			if (i === 1) { //swap sensor button (garage only)
-				if (json.devices[j].deviceType == DEVICE_GARAGE) {
+				if (json.devices[j].deviceType == DEVICE_GARAGE  || json.devices[j].deviceType == DEVICE_LATCH) {
 					cell.style.width = '50px';
 					var b1 = document.createElement('img');
 					b1.id = 'swap' + json.devices[j].mac;
@@ -417,9 +436,10 @@ function createSettingsTable(rows) {
 					b1.style.height = '30px';
 					b1.style.backgroundColor = getDeviceColor(json.devices[j]);
 					b1.onclick = function() {swapSensors(this);};
-					if (json.devices[j].sensor0 === json.devices[j].sensor1) { //if door is open or closed allow sensor swap
-						b1.style.visibility = 'hidden';
-					}
+					if (json.devices[j].deviceType === DEVICE_GARAGE)
+					  if (json.devices[j].sensor0 === json.devices[j].sensor1) b1.style.visibility = 'hidden';  //if door is open or closed allow sensor swap
+					if (json.devices[j].deviceType === DEVICE_LATCH) b1.style.visibility = 'visible';  //LATCH switch invert
+						
 					cell.appendChild(b1);
 				}
 
@@ -489,41 +509,51 @@ function createSettingsTable(rows) {
 
 function loadSettingsControls() {
 	console.log("**** loadSettingsControls ****")
-
+	var json = getJson();
 	createSettingsTable(json.devices.length);
 	displayTime();
 }
 
 function getDeviceColor(device){
-	var sensors = (device.online*100) + (device.sensor0*10) + device.sensor1;
-	if (device.sensorSwap === 0) {
-		switch (sensors) {
-			//online values
-			case 101: return RED; break;
-			case 111: return YELLOW; break;
-			case 110: return GREEN; break;
-			case 100: return PURPLE; break;
-			//offline values
-			case 10: return OFFLINE_RED; break;
-			case 1: return OFFLINE_YELLOW; break;
-			case 1: return OFFLINE_GREEN; break;
-			case 0: return OFFLINE_PURPLE; break;
+	if (device.deviceType == DEVICE_GARAGE) {
+		var sensors = (device.online*100) + (device.sensor0*10) + device.sensor1;
+		if (device.sensorSwap === 0) {
+			switch (sensors) {
+				//online values
+				case 101: return RED; break;
+				case 111: return YELLOW; break;
+				case 110: return GREEN; break;
+				case 100: return PURPLE; break;
+				//offline values
+				case 10: return OFFLINE_RED; break;
+				case 1: return OFFLINE_YELLOW; break;
+				case 1: return OFFLINE_GREEN; break;
+				case 0: return OFFLINE_PURPLE; break;
+			}
+		} else {
+			switch (sensors) {
+				//online values
+				case 110: return RED; break;
+				case 111: return YELLOW; break;
+				case 101: return GREEN; break;
+				case 100: return PURPLE; break;
+				//offline values
+				case 10: return OFFLINE_RED; break;
+				case 11: return OFFLINE_YELLOW; break;
+				case 1: return OFFLINE_GREEN; break;
+				case 0: return OFFLINE_PURPLE; break;
+			}
 		}
-	} else {
-		switch (sensors) {
-			//online values
-			case 110: return RED; break;
-			case 111: return YELLOW; break;
-			case 101: return GREEN; break;
-			case 100: return PURPLE; break;
-			//offline values
-			case 10: return OFFLINE_RED; break;
-			case 11: return OFFLINE_YELLOW; break;
-			case 1: return OFFLINE_GREEN; break;
-			case 0: return OFFLINE_PURPLE; break;
+	}
+	if (device.deviceType == DEVICE_LATCH) {
+		if (device.online) {
+			if (device.switchValue == 1) return RED; else return GREEN;
+		} else {
+			if (device.switchValue == 1) return OFFLINE_RED; else return OFFLINE_GREEN;
 		}
 	}
 }
+
 
 function getJson(){
     var Httpreq = new XMLHttpRequest(); // a new request
@@ -537,6 +567,73 @@ function getJson(){
 	}
 	return;
 }
+
+function getJson99(){
+	return pushedJson;
+}
+
+function getJson2() { 
+	return new Promise(function(resolve,reject) {
+		
+	});
+
+}
+
+async function getJson1(){
+	try{
+		var json = await getJson2();
+		console.log(json);
+		return json;
+
+	}
+	catch(error) {
+		console.log(error);
+	}
+}
+
+function get(url) {
+	// Return a new promise.
+	return new Promise(function(resolve, reject) {
+	  // Do the usual XHR stuff
+	  var req = new XMLHttpRequest();
+	  req.open('GET', url);
+  
+	  req.onload = function() {
+		// This is called even on 404 etc
+		// so check the status
+		if (req.status == 200) {
+		  // Resolve the promise with the response text
+		  resolve(req.response);
+		}
+		else {
+		  // Otherwise reject with the status text
+		  // which will hopefully be a meaningful error
+		  reject(Error(req.statusText));
+		}
+	  };
+  
+	  // Handle network errors
+	  req.onerror = function() {
+		reject(Error("Network Error"));
+	  };
+  
+	  // Make the request
+	  req.send();
+	});
+  }
+
+function getJson8() {
+	get('/var.json').then(function(response) {
+		console.log("Success!");
+		return JSON.parse(response);
+//		console.log(json);
+		return json;
+	}, function(error) {
+		console.error("Failed!", error);
+	});
+
+}
+
 
 function processJson(jsonString){
 
@@ -584,12 +681,31 @@ function processJson(jsonString){
 					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degC + ' / ' + degF + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 				}
+				if (json.devices[i].deviceType == DEVICE_LATCH) {		
+					var deviceTime = timeString(json.devices[i].deviceTime);
+					var latchTime = timeString(json.devices[i].latchTime);
+					var st = "";
+					if (json.devices[i].latchValue == 0) {
+						button.style.backgroundColor = GREEN;
+						st = "Closed since " + deviceTime;
+//						st = "Closed since " + deviceTime;
+					} else {
+						button.style.backgroundColor = RED;
+						st = "Opened " + latchTime + " (Currently ";
+						if (json.devices[i].switchValue == 1) st += "open)"; else st += "closed)";
+//						st = "Opened " + latchTime;
+					}
+
+					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + "</p>";
+					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
+				}
 			}
 			var swapbutton = document.getElementById('swap' + json.devices[i].mac);
 			if (swapbutton != null) {
-				if (json.devices[i].sensor0 === json.devices[i].sensor1) { //if door is open or closed alow sensor swap
-					swapbutton.style.visibility = 'hidden';
-				} else swapbutton.style.visibility = 'visible';
+				if (json.devices[i].deviceType === DEVICE_GARAGE) 
+					if (json.devices[i].sensor0 === json.devices[i].sensor1) swapbutton.style.visibility = 'hidden';
+					else swapbutton.style.visibility = 'visible';
+				if (json.devices[i].deviceType === DEVICE_LATCH) swapbutton.style.visibility = 'visible';	
 				swapbutton.style.backgroundColor = getDeviceColor(json.devices[i]);
 			}
 		}

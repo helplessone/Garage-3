@@ -1,5 +1,6 @@
 //#define SENSOR_TYPE DEVICE_GARAGE
-#define SENSOR_TYPE DEVICE_THERMOMETER
+//#define SENSOR_TYPE DEVICE_THERMOMETER
+#define SENSOR_TYPE DEVICE_LATCH
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -15,15 +16,6 @@
 #include <WiFiUdp.h>              //For UDP 
 #include <ArduinoJson.h>
 
-/*
-typedef struct {
-  byte month;  // 1-12
-  byte day;    // 1-31
-  byte year;   // Year 2000 based
-  byte hour;   // 0 - 23
-  byte minute; // 0 - 59 
-} sensorTime;
-*/
 
 #if SENSOR_TYPE == DEVICE_THERMOMETER
   #include <OneWire.h>
@@ -35,8 +27,9 @@ typedef struct {
   // Pass oneWire reference to DallasTemperature library
   DallasTemperature sensors(&oneWire);
   float currentTemp = 0.0;
-  bool tempRequest = false;
 #endif
+
+  bool forceUpdate = false;
 
 //ESP8266WiFiMulti WiFiMulti;
 WiFiManager wifiManager;
@@ -57,13 +50,24 @@ ESP8266WebServer server(80);
   #define D0 16
 #endif
 
-#define DOORUP 5      //Input: 0 if door is up (NodeMCU D1)
-#define DOORDOWN 4    //Input: 0 if door is down (NodeMCU D2)
-#define DOORBUTTON 14 //Output: set HIGH to activate garage door
+#if SENSOR_TYPE == DEVICE_GARAGE
+  #define DOORUP 5      //Input: 0 if door is up (NodeMCU D1)
+  #define DOORDOWN 4    //Input: 0 if door is down (NodeMCU D2)
+  #define DOORBUTTON 14 //Output: set HIGH to activate garage door
+#endif
+
+#if SENSOR_TYPE == DEVICE_LATCH
+  #define SWITCH 4      //Input: 0 if door is up (NodeMCU D2)
+#endif
+
 #define LED D0
 
-#if DEVICE_TYPE == DEVICE_GARAGE
+#if SENSOR_TYPE == DEVICE_GARAGE
   int doorUp, doorDown;
+#endif
+
+#if SENSOR_TYPE == DEVICE_LATCH
+  bool switchValue;
 #endif
 
 bool startup = true;
@@ -71,23 +75,29 @@ String macID = "";
 IPAddress serverIP;
 unsigned long heartbeat = 0;
 
+/************************  SETUP ************************/
 void setup() {
   pinMode(LED, OUTPUT);
   digitalWrite(LED,HIGH);
-
+  SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
+  
 #if SENSOR_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
   pinMode(DOORDOWN, INPUT);
   pinMode(DOORBUTTON, OUTPUT);
   digitalWrite (DOORBUTTON, LOW);
-
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
 #endif 
 
 #if SENSOR_TYPE == SENSOR_THERMOMETER
-  sensors.begin();  // Start up the library
+  sensors.begin();  // Start up the temperature library
 #endif
+
+#if SENSOR_TYPE == DEVICE_LATCH
+  pinMode(SWITCH, INPUT);
+  switchValue = digitalRead(SWITCH);
+#endif 
 
   macID = WiFi.macAddress();
 
@@ -129,23 +139,29 @@ void handleStatusUpdate() {
     sensors.requestTemperatures();
     float f = sensors.getTempCByIndex(0);
     if ((f < -120) || (f > 200)) f = currentTemp;
-    if (!(startup || tempRequest || (millis() - heartbeat > 10000) || 
+    if (!(startup || forceUpdate || (millis() - heartbeat > 10000) || 
           (abs(currentTemp - f) > 1.0 ))) return;
     if (abs(currentTemp - f) > 1.0 ) Serial.println("Forced temp update"); 
     if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
-    tempRequest = false;                  
     currentTemp = f; 
 #endif
-                   
+#if SENSOR_TYPE == DEVICE_LATCH 
+  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate ||
+                   (switchValue != digitalRead(SWITCH)))) return;
+#endif
+  forceUpdate = false;                                 
   displayInfo();
   heartbeat = millis();
 #if SENSOR_TYPE == DEVICE_GARAGE  
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
 #endif  
+#if SENSOR_TYPE == DEVICE_LATCH
+  switchValue = digitalRead(SWITCH);
+#endif   
   startup = false;
+  
   HTTPClient http;
-
   http.begin("http://"+serverIP.toString()+"/var.json"); 
   http.addHeader("Content-Type", "application/json");
 
@@ -165,7 +181,10 @@ void handleStatusUpdate() {
     Serial.println(temp);
     Serial.println(sensors.getTempCByIndex(0));
   #endif
-
+  #if SENSOR_TYPE == DEVICE_LATCH  
+    json["switchValue"] = switchValue?1:0;
+  #endif
+  
   serializeJsonPretty(json,st);
   Serial.println(st);
   int httpCode = http.POST(st);
@@ -191,6 +210,9 @@ void startWiFi() {
 #endif
 #if SENSOR_TYPE == DEVICE_THERMOMETER   
   wifiManager.autoConnect("Temperature Sensor");
+#endif
+#if SENSOR_TYPE == DEVICE_LATCH   
+  wifiManager.autoConnect("Latch Sensor");
 #endif
   digitalWrite(LED,HIGH);
 }
@@ -266,16 +288,19 @@ void startServer() {
         digitalWrite(LED,LOW);
 #if SENSOR_TYPE == DEVICE_THERMOMETER
         delay (200); //let the LED blink
-        tempRequest = true;
+        forceUpdate = true;
 #endif        
                 
 #if SENSOR_TYPE == DEVICE_GARAGE        
-        digitalWrite (DOORBUTTON, HIGH); //activate door
-        delay(200);   //press door button for 200ms & blink LED
-        digitalWrite (DOORBUTTON, LOW);
-#endif        
-        digitalWrite(LED,HIGH);
-
+        digitalWrite (DOORBUTTON, HIGH); //push the door opener button
+        delay(200);   
+        digitalWrite (DOORBUTTON, LOW);  //and release it
+#endif
+#if SENSOR_TYPE == DEVICE_LATCH
+        delay(200);   //just blink the LED
+        forceUpdate = true;
+#endif
+        digitalWrite(LED,HIGH);  //turn LED Off
         server.send(HTTP_CODE_OK);
         return;
       }

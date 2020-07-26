@@ -74,8 +74,10 @@ Device devices[MAX_DEVICES];
 
 byte closeDelayState[MAX_DEVICES];
 byte closeTimeState[MAX_DEVICES];
+byte closeState[MAX_DEVICES];
 unsigned long delayCloseTimer[MAX_DEVICES];
 unsigned long timeCloseTimer[MAX_DEVICES];
+unsigned long closeTimer[MAX_DEVICES];
 
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
 
@@ -89,9 +91,12 @@ extern "C" int clock_gettime(clockid_t unused, struct timespec *tp);
 bool updateGui = false; //forces gui update on next loop
 unsigned long heartbeatMillis = millis();
 unsigned long checkCloseDelayMillis = millis();
-unsigned long checkCloseTimeMillis = millis();
+//unsigned long checkCloseTimeMillis = millis();
+unsigned long closeStateTimer = 0;
 unsigned long getRealTimeMillis = millis();
 unsigned long offlineTimer = millis();
+
+unsigned long testMillis = millis();
 int hue = 0;
 
 /*__________________________________________________________SETUP__________________________________________________________*/
@@ -100,8 +105,10 @@ void setup() {
   Serial.begin(115200);        // Start the Serial communication to send messages to the computer
   
   for (int i=0; i<MAX_DEVICES; i++) {  //set auto close state machines to state 0
-    closeDelayState[i] = 0;
-    closeTimeState[i] = 0;
+//    closeDelayState[i] = 0;
+//    closeTimeState[i] = 0;
+    closeState[i] = 0;
+    closeTimer[i] = 0;
   }
   delay(10);
   Serial.println("\r\n");
@@ -133,6 +140,7 @@ void setup() {
 //  setenv("TZ", "PST+8PDT,M3.2.0/2,M11.1.0/2", 1);
   setenv("TZ", "UTC+0UTC,M3.2.0/2,M11.1.0/2", 1);
   tzset(); // save the TZ variable
+  updateGui = true;
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
@@ -145,6 +153,12 @@ void loop() {
   
   bool alarm = false;
    
+  if (updateGui) {    
+    pushJson();
+    updateGui = false;
+//    Serial.println("Update GUI");    
+  }
+    
   webSocket.loop();                           // constantly check for websocket events
   server.handleClient();                      // run the server
   
@@ -164,154 +178,104 @@ void loop() {
         if (devices[i].sensor[0] != 0 || devices[i].sensor[1] != 1 || devices[i].online == 0) alarm = true;        
       }
     }
+    if (devices[i].deviceType == DEVICE_LATCH) {
+      if (devices[i].latchValue) alarm = true;  
+    }
+    if (devices[i].deviceType == DEVICE_THERMOMETER) {
+      if (devices[i].celcius) {
+        if (devices[i].maxTemp != 0 && devices[i].temp > devices[i].maxTemp * 100) alarm = true;
+        if (devices[i].minTemp != 0 && devices[i].temp < devices[i].minTemp * 100) alarm = true;
+      } else {
+        if (devices[i].maxTemp != 0 && devices[i].temp > (int)(round(float(devices[i].maxTemp-32) * 5 / 9 * 100))) alarm = true;
+        if (devices[i].minTemp != 0 && devices[i].temp < (int)(round(float(devices[i].minTemp-32) * 5 / 9 * 100))) alarm = true;        
+      }
+    }  
   } 
 
-  if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
+  if (millis() - testMillis > 2000) {
+    testMillis = millis();
+    int mint, maxt;
+    for (int i=0; i<MAX_DEVICES; i++) {
+      if (devices[i].deviceType == DEVICE_THERMOMETER) {
+//        displayDevice(i);
+        
+        if (devices[i].celcius) {
+          mint = devices[i].minTemp * 100;
+          maxt = devices[i].maxTemp * 100;
 
-  //Check for Delay Auto close
-   
+        } else {
+          mint = (int)(float(devices[i].minTemp-32) * 5 / 9 * 100); // * (5/9)* 100;
+          maxt = (int)(float(devices[i].maxTemp-32) * 5 / 9 * 100); // * (5/9)* 100;      
+        }        
+        Serial.printf("Device %d, temp = %d, min = %d, max = %d, devicemin = %d, devicemax = %d\n",i,devices[i].temp,mint,maxt,devices[i].minTemp,devices[i].maxTemp);
+        
+      }
+    }
+  }
+
+  if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
+  
   if ((millis() - checkCloseDelayMillis) > 2000) {
     for (int i=0; i<MAX_DEVICES; i++) {
-      if (closeTimeState[i] > 1) continue; //skip device if auto Time Close in progress
       if (devices[i].deviceType == DEVICE_GARAGE) {
-        if (devices[i].closeDelay > 0) {
-          switch (closeDelayState[i]) {
-            case 0: { //if door is not closed, go to state 1 
-              if ((garageDoorPosition(devices[i]) != DOOR_CLOSED)) { 
-                Serial.printf("Device %d: Delay STATE 0 -> 1 (Door Open, wait for timer)\n",i);
-                delayCloseTimer[i] = millis();
-                closeDelayState[i] = 1;
-              }                                               
-            }
-            break;
-            case 1: { 
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) { //if it closes before timer expires
-                Serial.println ("State 1: DOOR CLOSED!");
-                Serial.printf("Device %d: Delay STATE 1 -> 0\n",i);
-                closeDelayState[i] = 0;                
-              }
-              if (millis() - delayCloseTimer[i] > (devices[i].closeDelay * 60 *1000)) {  //if timer has expired  
-                  pressDoorButton(devices[i]); //press the button
-                  delayCloseTimer[i] = millis();
-                  closeDelayState[i] = 2;
-                  Serial.printf("Device %d: Delay STATE 1 -> 2 (Pushed button, wait 20 sec for door to close)\n",i);
-              }              
-            }
-            break;
-            case 2: { //garage was open, waiting for close
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) {
-                Serial.println ("State 2: DOOR CLOSED!");
-                Serial.printf("Device %d: Delay STATE 2 -> 0\n",i);
-                closeDelayState[i] = 0; 
-                break;
-              }
-              if (millis() - delayCloseTimer[i] > 20000) {
-                //then the door didn't close in 20 seconds, try again once more
-                delayCloseTimer[i] = millis();
-                closeDelayState[i] = 3;
-                pressDoorButton(devices[i]);               
-                Serial.printf("Device %d: Delay STATE 2 -> 3 (Door didn't close, try again)\n",i);
-              }
-            }
-            break;            
-            case 3: {
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) {
-                Serial.println ("State 3: DOOR CLOSED!");
-                Serial.printf("Device %d: Delay STATE 3 -> 0\n",i);
-                closeDelayState[i] = 0; 
-                break;
-              }
-              if (millis() - delayCloseTimer[i] > 20000) {
-                //if the door didn't close in 20 seconds, abort
-                closeDelayState[i] = 0;
-                Serial.printf("Device %d: DOOR WOULD NOT CLOSE\n", i);
-                Serial.printf("Device %d: Delay STATE 3 -> 0\n",i);
-              }                           
-            }
-            break;         
-          } 
+        if (garageDoorPosition(devices[i]) == DOOR_CLOSED) {
+          if (closeState[i] == 0 && closeTimer[i] != 0) Serial.printf("Device %d: DOOR CLOSED STATE %d -> 0 (Timer Cancelled)\n",i,closeState[i]);
+          if (closeState[i] != 0) Serial.printf("Device %d: DOOR CLOSED STATE %d -> 0\n",i,closeState[i]);
+          closeState[i] = 0;
+          closeTimer[i] = 0;
+          continue;     //go to next device
         }
+        switch (closeState[i]) {
+          case 0: { 
+            if (devices[i].closeDelay > 0) {
+              if (closeTimer[i] == 0) {
+                closeTimer[i] = millis();
+                Serial.printf("Device %d: STATE 0 (Starting %d min Timer)\n",i,devices[i].closeDelay);
+              }
+              if ((millis() - closeTimer[i]) > (devices[i].closeDelay * 60 * 1000)) {
+                closeState[i] = 1; //start close procedure 
+                closeTimer[i] = millis();
+                Serial.printf("Device %d: STATE 0 -> 1 (Delay timer expired)\n",i);
+                pressDoorButton(devices[i]); //press the button
+                break;
+              }
+            }
+            if (devices[i].closeTime > 0) {
+              unsigned long ltime = getLocalTime();
+              int localTime = hour(ltime) * 100 + minute(ltime);
+              if (devices[i].closeTime == localTime) {
+                closeState[i] = 1; //start close procedure 
+                closeTimer[i] = millis();
+                Serial.printf("Device %d: STATE 0 -> 1 (Time of day hit)\n",i);
+                pressDoorButton(devices[i]); //press the button
+              }
+            }
+          }
+          break;
+          case 1: { 
+            if (millis() - closeTimer[i] > 20000) {
+              closeState[i] = 2;
+              closeTimer[i] = millis();
+              Serial.printf("Device %d: STATE 1 -> 2 (Trying again...)\n",i);
+              pressDoorButton(devices[i]); //press the button
+            }
+          }
+          break;
+          case 2: { //garage was open, waiting for close
+            if (millis() - closeTimer[i] > 20000) {
+              //if the door didn't close in 20 seconds, abort
+              closeState[i] = 0;
+              closeTimer[i] = 0;
+              Serial.printf("Device %d: DOOR DID NOT CLOSE\n", i);
+              Serial.printf("Device %d: STATE 2 -> 0\n",i);
+            }                           
+          }
+          break;                 
+        } 
       }
     }
     checkCloseDelayMillis = millis();
   }
-
-  //Check for Time autoclose
-  
-  time_t ltime = (time_t)getLocalTime();
-  time_t utctime = (time_t)getTime();
-  int currTime;
-  
-  if ((millis() - checkCloseTimeMillis) > 2000) {
-    for (int i=0; i<MAX_DEVICES; i++) {
-      if (closeDelayState[i] > 1) continue; //skip device if auto Delay Close in progress
-      if (devices[i].deviceType == DEVICE_GARAGE) {
-        if (devices[i].closeTime > 0) {
-          currTime = (hour(ltime) *100) + minute(ltime);
-          switch (closeTimeState[i]) {
-            case 0: { //if door is not closed, go to state 1 
-              if ((garageDoorPosition(devices[i]) != DOOR_CLOSED)) { 
-                Serial.printf("Device %d: Time STATE 0 -> 1 (Door Open, wait closeTime)\n",i);
-                timeCloseTimer[i] = millis();
-                closeTimeState[i] = 1;
-              }                                               
-            }
-            break;
-            case 1: { 
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) { //if it closes before it's close time
-                Serial.println ("State 1: DOOR CLOSED!");
-                Serial.printf("Device %d: Time STATE 1 -> 0\n",i);
-                closeTimeState[i] = 0;                
-              }
-              time_t cTime = getLocalTime();
-              int currTime = hour(cTime) * 100 + minute(cTime);
-              Serial.printf("currTime = %d, closeTime = %d\n",currTime,(devices[i].closeTime));
-              if ((devices[i].closeTime) == currTime) {   //it's time to close  
-                  pressDoorButton(devices[i]);            //press the button
-                  timeCloseTimer[i] = millis();
-                  closeTimeState[i] = 2;
-                  Serial.printf("Device %d: Time STATE 1 -> 2 (Pushed button, wait 20 sec for door to close)\n",i);
-              }              
-            }
-            break;
-            case 2: { //garage was open, waiting for close
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) {
-                Serial.println ("State 2: DOOR CLOSED!");
-                Serial.printf("Device %d: Time STATE 2 -> 0\n",i);
-                closeTimeState[i] = 0; 
-                break;
-              }
-              if (millis() - timeCloseTimer[i] > 20000) {
-                //then the door didn't close in 20 seconds, try again once more
-                timeCloseTimer[i] = millis();
-                closeTimeState[i] = 3;
-                pressDoorButton(devices[i]);               
-                Serial.printf("Device %d: Time STATE 2 -> 3 (Door didn't close, try again)\n",i);
-              }
-            }
-            break;            
-            case 3: {
-              if (garageDoorPosition(devices[i]) == DOOR_CLOSED) {
-                Serial.println ("State 3: DOOR CLOSED!");
-                Serial.printf("Device %d: Time STATE 3 -> 0\n",i);
-                closeTimeState[i] = 0; 
-                break;
-              }
-              if (millis() - timeCloseTimer[i] > 20000) {
-                //if the door didn't close in 20 seconds, abort
-                closeTimeState[i] = 0;
-                Serial.printf("Device %d: DOOR WOULD NOT CLOSE\n", i);
-                Serial.printf("Device %d: Time STATE 3 -> 0\n",i);
-              }                           
-            }
-            break;         
-          } 
-        }
-      }
-    }
-    checkCloseTimeMillis = millis();
-  }
-
   
   if ((millis() - heartbeatMillis) > 15000) {
     digitalWrite (LED_BUILTIN, LOW);
@@ -323,11 +287,7 @@ void loop() {
   ArduinoOTA.handle();                        // listen for OTA events
   handleUDP();
 
-  if (updateGui) {    
-    pushJson();
-    updateGui = false;    
-  }
-  
+
 }
 
 void pushJson(){
@@ -394,6 +354,12 @@ String getJsonString() {
         json["devices"][i]["minTemp"] = devices[i].minTemp;        
         json["devices"][i]["celcius"] = devices[i].celcius;        
       }
+      if (devices[i].deviceType == DEVICE_LATCH) {
+        json["devices"][i]["switchValue"] = devices[i].switchValue;
+        json["devices"][i]["latchValue"] = devices[i].latchValue;           
+        json["devices"][i]["switchReverse"] = devices[i].switchReverse?1:0;        
+        json["devices"][i]["latchTime"] = devices[i].latchTime;        
+      }
     }
   }
   serializeJsonPretty(json,st);
@@ -445,7 +411,6 @@ String deviceToString(Device device) {
   st = buffer; 
   return st;
 }
-
  
 /*__________________________________________________________SETUP_FUNCTIONS__________________________________________________________*/
 
@@ -520,7 +485,7 @@ void startMDNS() { // Start the mDNS responder
   Serial.println(".local");
 }
 
-void updateDevice(String data) {  // This routine invoked by '^' 
+void updateDevice(String data) {  // This routine invoked by '^' from javascript 
   bool save = false;
   Serial.println(data);
   StaticJsonDocument<JSON_BUF_SIZE/4> doc;
@@ -578,11 +543,9 @@ void updateDevice(String data) {  // This routine invoked by '^'
           st.toCharArray(devices[deviceIndex].deviceName, sizeof(devices[deviceIndex].deviceName));       
           save = true;
         STRCASE("temp")
-          if ((int)devices[deviceIndex].temp != (int)keyValue.value()) {
-            devices[deviceIndex].temp = (int)keyValue.value();
-            devices[deviceIndex].deviceTime = getTime();         
-            updateGui = true;
-          }
+          devices[deviceIndex].temp = (int)keyValue.value();
+          devices[deviceIndex].deviceTime = getTime();                   
+          updateGui = true;
         STRCASE("minTemp")
           devices[deviceIndex].minTemp = (int)keyValue.value();
           save = true;
@@ -592,12 +555,29 @@ void updateDevice(String data) {  // This routine invoked by '^'
         STRCASE("celcius")
           devices[deviceIndex].celcius = (int)keyValue.value();
            save = true;
-       STRCASE("closeDelay")
+        STRCASE("closeDelay")
            devices[deviceIndex].closeDelay = (int)keyValue.value();
            save = true;
-       STRCASE("closeTime")
+        STRCASE("closeTime")
            devices[deviceIndex].closeTime = (int)keyValue.value();
            save = true;
+/*           
+        STRCASE("switchValue") {
+          Serial.println("updateDevice switchValue");
+          if ((int)devices[deviceIndex].switchValue != (int)keyValue.value()) {
+            devices[deviceIndex].switchValue = keyValue.value();
+            devices[deviceIndex].deviceTime = getTime();
+            updateGui = true;
+          }
+        }   
+*/
+        STRCASE("switchReverse") {
+          devices[deviceIndex].switchReverse = !devices[deviceIndex].switchReverse;
+          devices[deviceIndex].switchValue = !devices[deviceIndex].switchValue;
+          devices[deviceIndex].latchValue = !devices[deviceIndex].latchValue;
+          Serial.printf("switchReverse = %d\n",devices[deviceIndex].switchReverse?1:0);
+          updateGui = true;
+        }
       }
     }
   }
@@ -669,18 +649,30 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
           updateGui = true;
         }   
         STRCASE("sensorSwap")
-          if ((int)devices[deviceIndex].sensorSwap != (int)keyValue.value()) {
-            devices[deviceIndex].sensorSwap = keyValue.value();
-            Serial.println("sensorSwap 0");           
-            updateGui = true;
+        if ((int)devices[deviceIndex].sensorSwap != (int)keyValue.value()) {
+          devices[deviceIndex].sensorSwap = keyValue.value();
+          Serial.println("sensorSwap 0");           
+          updateGui = true;
         }  
-        STRCASE("temp")
-          if (((int)devices[deviceIndex].temp != (int)keyValue.value())) {        
-            devices[deviceIndex].temp = (int)keyValue.value();
-            devices[deviceIndex].deviceTime = getTime();
-            updateGui = true;
-          }
+        STRCASE("temp") {
+          devices[deviceIndex].temp = (int)keyValue.value();
+          devices[deviceIndex].deviceTime = getTime();
+          updateGui = true;
         }
+        STRCASE("switchValue") {
+          bool switchVal = (bool)keyValue.value();
+          if (devices[deviceIndex].switchReverse) switchVal = !switchVal;          
+          Serial.printf("switchVal %d, switchReverse %d\n", switchVal?1:0, devices[deviceIndex].switchReverse?1:0);
+          if (devices[deviceIndex].switchValue != switchVal) devices[deviceIndex].deviceTime = getTime();
+          devices[deviceIndex].switchValue = switchVal;
+          if (devices[deviceIndex].switchValue && !devices[deviceIndex].latchValue) {
+            Serial.printf ("Latch %d set\n",deviceIndex);
+            devices[deviceIndex].latchValue = true;
+            devices[deviceIndex].latchTime = getTime();
+          }
+          updateGui = true;
+        }
+      }     
     }
     if (save) saveSettings();
     server.send(200,"text/plain","ok");
@@ -879,7 +871,10 @@ void handleNotFound(){ // if the requested file or page doesn't exist, return a 
 
 bool handleFileRead(String path) { // send the right file to the client (if it exists)
   Serial.println("handleFileRead: " + path);
-  if (path.endsWith("/")) path += "index.html";          // If a folder is requested, send the index file
+  if (path.endsWith("/")) {
+    path += "index.html";          // If a folder is requested, send the index file
+    updateGui = true;               // and force Gui update
+  }
   String contentType = getContentType(path);             // Get the MIME type
   String pathWithGz = path + ".gz";
   if (SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
@@ -939,7 +934,7 @@ void pressDoorButton(Device device){
   IPAddress IP = device.ip;
   HTTPClient http;
   http.begin("http://"+IP.toString()+"/");
-  http.POST(ACTION_MESSAGE);    //Tell garage door client to push door button  
+  http.POST(ACTION_MESSAGE);    //Action message to device  
 }
 
 // When a webSocketEvent message is from javascript
@@ -951,6 +946,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
       break;
     case WStype_CONNECTED: {              // if a new websocket connection is established
         IPAddress ip = webSocket.remoteIP(num);
+        updateGui = true;
         Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
       }
       break;
@@ -963,7 +959,14 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           bool newDevice;
           Serial.println(st.substring(1,st.length()));
           int index = getDeviceIndex(st.substring(1,st.length()),&newDevice);
-          if (!newDevice) pressDoorButton(devices[index]);
+          if (!newDevice) {
+            pressDoorButton(devices[index]);
+            if (devices[index].deviceType == DEVICE_LATCH) {
+              devices[index].latchValue = 0;
+              Serial.printf ("Latch %d cleared\n",index);
+              updateGui = true;
+            }
+          }
         }
         break;
         // used for misc commands: deleteDevice, moveDevice   
@@ -986,7 +989,11 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           json.remove(0,1);                   
           updateDevice(json);
         }
-        break;         
+        break; 
+        case '!': {  //request json update
+          updateGui = true;        
+        }
+        break;
         default: {
           switch (payload[0]) {
             case 'S': {
