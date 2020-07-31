@@ -1,6 +1,6 @@
-#define SENSOR_TYPE DEVICE_GARAGE
+//#define SENSOR_TYPE DEVICE_GARAGE
 //#define SENSOR_TYPE DEVICE_THERMOMETER
-//#define SENSOR_TYPE DEVICE_LATCH
+#define SENSOR_TYPE DEVICE_LATCH
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -8,7 +8,6 @@
 
 #include <ESP8266WiFi.h>
 //#include <ESP8266WiFiMulti.h>
-#include <ArduinoOTA.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
 #include <ESP8266HTTPClient.h>
@@ -36,8 +35,6 @@
 WiFiManager wifiManager;
 WiFiUDP Udp;
 ESP8266WebServer server(80); 
-const char *OTAName = "ESP8266";  // A name and a password for the OTA service
-const char *OTAPassword = "";     //"esp8266";
 
 
 #ifndef GARAGE_UDP
@@ -118,7 +115,6 @@ void setup() {
   } 
 
   startWiFi(); 
-  startOTA();                  // Start the OTA service
   displayInfo();
   Udp.begin(UDP_PORT);         // Start listening for UDP
   startServer();
@@ -127,7 +123,6 @@ void setup() {
 
 void loop() {
   handleStatusUpdate();  
-  ArduinoOTA.handle();                        // listen for OTA events
   handleUDP();
   server.handleClient();
   delay(1);
@@ -276,31 +271,6 @@ void handleUDP() {
   }
 }
 
-void startOTA() { // Start the OTA service
-  ArduinoOTA.setHostname(OTAName);
-  ArduinoOTA.setPassword(OTAPassword);
-
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\r\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.begin();
-  Serial.println("OTA ready\r\n");
-}
-
 void findServer() {
   IPAddress scanAddress = WiFi.localIP();
   scanAddress[3] = 255;
@@ -316,7 +286,6 @@ void startServer() {
       Serial.println(server.arg(i));
       if (server.arg(i).equals(ACTION_MESSAGE)) {
         digitalWrite(LED,LOW);
-        server.send(HTTP_CODE_OK);
 #if SENSOR_TYPE == DEVICE_THERMOMETER
         delay (200); //let the LED blink
         forceUpdate = true;
@@ -332,6 +301,7 @@ void startServer() {
         forceUpdate = true;
 #endif
         digitalWrite(LED,HIGH);  //turn LED Off
+        server.send(HTTP_CODE_OK);
         return;
       }
       server.send(HTTP_CODE_BAD_REQUEST);

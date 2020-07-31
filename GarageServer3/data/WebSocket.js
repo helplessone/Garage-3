@@ -1,8 +1,8 @@
 var rainbowEnable = false;
 var connection = new WebSocket('ws://'+location.hostname+':81/', ['arduino']);
-
-var settingsColumn = ['0px','0px','0px'];
-var screenWidth = 410;
+//var json = getJson();
+//var pushedJson;
+//var bloadControls = false;
 
 var YELLOW = "#ffd11a";
 var RED = "#ff0000";
@@ -29,21 +29,27 @@ var timeOffset = 0;
 
 connection.onopen = function () {
 	connection.send("Connect " + new Date());
-	console.log("connection.onopen");
+	console.log("connection.onopen = " + Date.now().toString());
 };
 connection.onerror = function (error) {
     console.log("WebSocket Error ", error);
 };
 connection.onmessage = function (e) {
 	console.log ("Received pushed json");
-	console.log(json);
+/*	
+	if (bloadControls === true) {
+		loadControls();
+		bloadControls = false;
+	}
+	pushedJson = JSON.parse(e.data);
+*/	
 	processJson(e.data);
 };
 connection.onclose = function(){
     console.log("WebSocket connection closed");
 };
 
-setInterval(getIntervalJson, 300000); // every 5 minutes
+// setInterval(getJson, 200);
 
 function mainButtonPressed(button) {
 	console.log('**** Button Pressed ******')
@@ -102,6 +108,7 @@ function deleteSettings() {
 }
 
 function addDoorButton (deviceName, mac) {
+
 	var b1 = document.createElement("BUTTON"); // Create Button
 	if (json.devices.length > 4) b1.style.width = "95%"; else b1.style.width = "95%";
 	b1.style.height = "80px"; //was 80
@@ -124,10 +131,11 @@ function addDoorButton (deviceName, mac) {
 
 function addDoorTextBox (device, container) {
 	var br = document.createElement("br");
+	console.log(device);
 
 	if (device.deviceType == DEVICE_GARAGE) {
 		var closeDelay = document.createElement('input'); // closeDelay to automatically close
-		closeDelay.style.width = '40px';
+		closeDelay.style.width = '15%';
 		closeDelay.style.height = '20px';
 		closeDelay.style.marginTop = '4px';
 		closeDelay.style.marginLeft = '5px';
@@ -142,7 +150,7 @@ function addDoorTextBox (device, container) {
 		closeDelay.value = device.closeDelay;
 
 		var closeTime = document.createElement('input'); // time to automatically close
-		closeTime.style.width = '45px';
+		closeTime.style.width = '20%';
 		closeTime.style.height = '20px';
 		closeTime.style.marginTop = '4px';
 		closeTime.style.marginLeft = '5px';
@@ -157,17 +165,16 @@ function addDoorTextBox (device, container) {
 		closeTime.setAttribute('mac',device.mac);
 		closeTime.value = device.closeTime;
 		
-		var t0 = document.createTextNode("");
-		var t1 = document.createTextNode("Auto Close After");
-		var t2 = document.createTextNode("Minutes");
-		var t3 = document.createTextNode("Auto Close at");
+		var t1 = document.createTextNode("AUTO CLOSE AFTER");
+		var t2 = document.createTextNode("MINUTES");
+		var t3 = document.createTextNode("AUTO CLOSE AT");
 		var t4 = document.createTextNode("(9pm=2100)");
 	}	
 
 	
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		var min = document.createElement('input'); // min input		
-		min.style.width = '30px';
+		min.style.width = '15%';
 		min.style.height = '20px';
 		min.style.marginTop = '4px';
 		min.style.marginLeft = '0px';
@@ -182,7 +189,7 @@ function addDoorTextBox (device, container) {
 		min.value = device.minTemp;
 
 		var max = document.createElement('input'); // max input
-		max.style.width = '30px';
+		max.style.width = '15%';
 		max.style.height = '20px';
 		max.style.marginTop = '4px';
 		max.style.marginLeft = '2px';
@@ -198,7 +205,7 @@ function addDoorTextBox (device, container) {
 		
 		var celcius = document.createElement('input'); // celcius check box
 		celcius.setAttribute("type", "checkbox");
-		celcius.style.width = '15px';
+		celcius.style.width = '10%';
 		celcius.style.height = '20px';
 		celcius.style.marginBottom = '6px';
 		celcius.style.marginLeft = '2px';
@@ -209,53 +216,19 @@ function addDoorTextBox (device, container) {
 		celcius.id = 'CELCIUS' + device.mac;
 		celcius.checked = (device.celcius == 1)?true:false;
 		
-		var mn = document.createTextNode("Min ");
-		var mx = document.createTextNode("Max ");
+		var mn = document.createTextNode("MIN ");
+		var mx = document.createTextNode("MAX ");
 		var cel = document.createTextNode("\xB0C");
 	}
 
-
-	if (device.deviceType == DEVICE_THERMOMETER) {
-		var icon_therm = document.createElement('img');
-		icon_therm.src =  'https://api.iconify.design/openmoji:thermometer.svg';
-//		https://api.iconify.design/wi:thermometer.svg'; //?height=30&inline=false';
-		icon_therm.style.width = '30px';
-		icon_therm.style.height = '30px';
-		icon_therm.style.verticalAlign = '-5px';
-		icon_therm.style.backgroundColor = WHITE;
-		container.appendChild(icon_therm);
-	}
-	if (device.deviceType == DEVICE_GARAGE) {
-		var icon_house = document.createElement('img');
-		icon_house.src =  'https://api.iconify.design/mdi:garage.svg?color=%230099ff';
-//		https://api.iconify.design/ion:home-outline.svg';
-		icon_house.style.width = '30px';
-		icon_house.style.height = '30px';
-		icon_house.style.verticalAlign = '-5px';
-		icon_house.style.backgroundColor = WHITE;
-		container.appendChild(icon_house);
-		
-	}	
-	if (device.deviceType == DEVICE_LATCH) {
-		var icon_latch = document.createElement('img');
-		icon_latch.src =  'https://api.iconify.design/noto:open-mailbox-with-raised-flag.svg';
-//		https://api.iconify.design/emojione-monotone:closed-mailbox-with-raised-flag.svg';
-		icon_latch.style.width = '30px';
-		icon_latch.style.height = '30px';
-		icon_latch.style.verticalAlign = '-5px';
-		icon_latch.style.backgroundColor = WHITE;
-		container.appendChild(icon_latch);
-	}	
-
-
-	var tb = document.createElement('input'); // Create Text Box
-	if (device.deviceType == DEVICE_GARAGE) tb.style.width = screenWidth - 140 + 'px'; //"150px"; //220px";  //container.style.width - b1.style.width; //  '95%';
-	if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = screenWidth - 140 + 'px'; //'95%';
-	if (device.deviceType == DEVICE_LATCH) tb.style.width = screenWidth - 140 + 'px';
+	var tb = document.createElement('input'); // Create Button
+	if (device.deviceType == DEVICE_GARAGE) tb.style.width = '95%';
+	if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = '95%';
+	if (device.deviceType == DEVICE_LATCH) tb.style.width = '95%';
 
 	tb.style.height = '40px';
 	tb.style.marginTop = '2px';
-	tb.style.marginLeft = '3px';
+	tb.style.marginLeft = '0px';
 	tb.style.marginRight = '0px';
 	tb.style.borderRadius = '10px';
 	tb.style.color = 'black';
@@ -267,9 +240,6 @@ function addDoorTextBox (device, container) {
 	container.appendChild(tb);
 
 	if (device.deviceType == DEVICE_GARAGE) {
-		
-		container.appendChild(t0);
-		container.appendChild(br);
 		container.appendChild(t1);		
 		container.appendChild(closeDelay);
 		container.appendChild(t2);
@@ -279,7 +249,6 @@ function addDoorTextBox (device, container) {
 		container.appendChild(t4);
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
-		container.appendChild(br);
 		container.appendChild(mn);		
 		container.appendChild(min);
 		container.appendChild(mx);
@@ -296,7 +265,6 @@ function buttonPress(image){
 function loadMainControls() {
 	var i;
 	console.log("loadControls()")
-	setScreenWidth();
 	var json = getJson();
 	console.log(json);
 	console.log("****** loadMainControls() *************");
@@ -427,11 +395,12 @@ function swapSensors(button){
 	}	
 }
 
-function createSettingsTable() {
+function createSettingsTable(rows) {
 	json = getJson();
+	var br = document.createElement("br");
+
 	//body reference
 	var container = document.getElementById("settingsControls");
-	var br = document.createElement("br");
 
 	// cells creation
 	for (var j = 0; j < json.devices.length; j++) {
@@ -442,10 +411,9 @@ function createSettingsTable() {
 		tbl.style.border = "thin solid black";
 		var tblBody = document.createElement("tbody");
 
-		// table row creation
+	// table row creation
 		var row = document.createElement("tr");
-//		row.style.width = '100%';
-//		row.className = 'settingsTableRow';
+		row.className = 'settingsTableRow';
 
 		for (var i = 0; i < 3; i++) {
 			// create element <td> and text node
@@ -455,17 +423,15 @@ function createSettingsTable() {
 //			cell.className = 'settingsTableCell';
 
 			if (i === 0) {
-				cell.style.width = settingsColumn[0];
 				addDoorTextBox(json.devices[j], cell);
-				cell.appendChild(br);
 			}
-			if (i === 1) { //swap sensor button (garage only)				
-				cell.style.width = settingsColumn[1]; 
+			if (i === 1) { //swap sensor button (garage only)
 				if (json.devices[j].deviceType == DEVICE_GARAGE  || json.devices[j].deviceType == DEVICE_LATCH) {
+					cell.style.width = '50px';
 					var b1 = document.createElement('img');
 					b1.id = 'swap' + json.devices[j].mac;
 					b1.setAttribute("mac",json.devices[j].mac);
-					b1.src =  '/reverse.png';
+					b1.src = '/reverse.png';
 					b1.style.width = '30px';
 					b1.style.height = '30px';
 					b1.style.backgroundColor = getDeviceColor(json.devices[j]);
@@ -476,13 +442,13 @@ function createSettingsTable() {
 						
 					cell.appendChild(b1);
 				}
-				
+
 				if (json.devices[j].online === 0) { // if door if offline, allow delete
 					var b1 = document.createElement('img');
 					b1.setAttribute("mac",json.devices[j].mac);
 					b1.src = '/trash-can.png';
-					b1.style.width = '30px'; //'30px';
-					b1.style.height = '30px'; //'30px';
+					b1.style.width = '30px';
+					b1.style.height = '30px';
 					b1.onclick = function() {deleteDoor(this);};
 					cell.appendChild(br);
 					cell.appendChild(b1);
@@ -490,7 +456,7 @@ function createSettingsTable() {
 			}
 			
 			if (i === 2) { //move buttons
-				cell.style.width = settingsColumn[2]; 
+				cell.style.width = '50px';
 				var b1 = document.createElement('img');
 				b1.setAttribute("mac",json.devices[j].mac);
 				b1.src = '/arrow-up.png';
@@ -502,13 +468,13 @@ function createSettingsTable() {
 				cell.appendChild(br);
 
 				var b2 = document.createElement('img');
-				cell.appendChild(b2);
 				b2.setAttribute("mac",json.devices[j].mac);
 				b2.src = '/arrow-up.png';
 				b2.style.width = '30px';
 				b2.style.height = '30px';
 				b2.style.transform = 'rotate(180deg)';
 				b2.onclick = function() {moveDown(this);};
+				cell.appendChild(b2);
 			}
 
 			row.appendChild(cell);
@@ -521,21 +487,30 @@ function createSettingsTable() {
 		// put <table> in the <settingsControls>
 		container.appendChild(tbl);	
 	}
-}
 
-function setScreenWidth() {
-	screenWidth = screen.width;
-	if (screenWidth > 410) screenWidth = 410;
+
+
+
+	var b1 = document.createElement('img');
+	b1.src = '/reverse.png';
+	b1.style.width = '30px';
+	b1.style.height = '30px';
+	b1.style.vericalAlign = 'bottom';
+
+/*
+	var s = document.createElement('span');
+	s.style.fontSize = '18px';
+	var txt = document.createTextNode(" = Switch Door Position");
+	s.appendChild(b1);
+	s.appendChild(txt);
+	container.appendChild(s);
+*/	
 }
 
 function loadSettingsControls() {
 	console.log("**** loadSettingsControls ****")
-	setScreenWidth();
-	settingsColumn[0] = screenWidth - 100 + 'px';
-	settingsColumn[1] = '30px';
-	settingsColumn[2] = '30px';
- 	var json = getJson();
-	createSettingsTable();
+	var json = getJson();
+	createSettingsTable(json.devices.length);
 	displayTime();
 }
 
@@ -579,10 +554,6 @@ function getDeviceColor(device){
 	}
 }
 
-function getIntervalJson() {
-	console.log("getIntervalJson()");
-	getJson();
-}
 
 function getJson(){
     var Httpreq = new XMLHttpRequest(); // a new request
@@ -689,7 +660,7 @@ function processJson(jsonString){
 						default: st = "Offline since ";
 					}
 					var deviceTime = timeString(json.devices[i].deviceTime);
-//					var ip = json.devices[i].ip.split('.',4);
+
 					button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
 				}
 				if (json.devices[i].deviceType == DEVICE_THERMOMETER) {

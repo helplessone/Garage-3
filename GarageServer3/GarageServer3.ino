@@ -31,7 +31,7 @@ File fsUploadFile;                 // a File variable to temporarily store the r
 //const char *password = "";   // The password required to connect to it, leave blank for an open network
 
 const char *OTAName = "ESP8266";           // A name and a password for the OTA service
-const char *OTAPassword = "wade"; //"esp8266";
+const char *OTAPassword = "esp8266";
 
 
 
@@ -95,7 +95,6 @@ unsigned long checkCloseDelayMillis = millis();
 unsigned long closeStateTimer = 0;
 unsigned long getRealTimeMillis = millis();
 unsigned long offlineTimer = millis();
-unsigned long clientRefreshTimer = millis();
 
 unsigned long testMillis = millis();
 int hue = 0;
@@ -147,23 +146,17 @@ void setup() {
 /*__________________________________________________________LOOP__________________________________________________________*/
 
 void loop() {
-  unsigned long loopMillis = millis();
 //  SPIFFS.remove("/devices.txt");
 //  delay(500);
 //  return;
   delay(0);
   
   bool alarm = false;
-/*  
-  if (millis() - clientRefreshTimer > 60000) {
-    clientRefreshTimer = millis();
-    pushJson();
-    Serial.println("Refresh timer");
-  }
-*/  
+   
   if (updateGui) {    
     pushJson();
     updateGui = false;
+//    Serial.println("Update GUI");    
   }
     
   webSocket.loop();                           // constantly check for websocket events
@@ -172,13 +165,11 @@ void loop() {
   for (int i=0; i<MAX_DEVICES; i++) {
     if (devices[i].deviceType != DEVICE_NONE){
       if (millis() - devices[i].timer > SENSOR_TIMEOUT) {
-        Serial.printf("Sensor Timeout device %d\n",i);
         devices[i].online = 0;
-        devices[i].timer = millis();// - SENSOR_TIMEOUT;   //keep timer from rolling over
+        devices[i].timer = millis() - SENSOR_TIMEOUT;   //keep timer from rolling over
       }
     }
   }
-  
   for (int i=0; i<MAX_DEVICES; i++) {  //Determine if LASER need to be turned on
     if (devices[i].deviceType == DEVICE_GARAGE) {
       if (devices[i].sensorSwap == 0) {
@@ -216,7 +207,7 @@ void loop() {
           mint = (int)(float(devices[i].minTemp-32) * 5 / 9 * 100); // * (5/9)* 100;
           maxt = (int)(float(devices[i].maxTemp-32) * 5 / 9 * 100); // * (5/9)* 100;      
         }        
-//        Serial.printf("Device %d, temp = %d, min = %d, max = %d, devicemin = %d, devicemax = %d\n",i,devices[i].temp,mint,maxt,devices[i].minTemp,devices[i].maxTemp);
+        Serial.printf("Device %d, temp = %d, min = %d, max = %d, devicemin = %d, devicemax = %d\n",i,devices[i].temp,mint,maxt,devices[i].minTemp,devices[i].maxTemp);
         
       }
     }
@@ -288,23 +279,20 @@ void loop() {
   
   if ((millis() - heartbeatMillis) > 15000) {
     digitalWrite (LED_BUILTIN, LOW);
-    if ((millis() - heartbeatMillis) > 15000+50) {
-      digitalWrite (LED_BUILTIN, HIGH);
-      heartbeatMillis = millis();  
-    }
+    delay (50);
+    digitalWrite (LED_BUILTIN, HIGH);
+    heartbeatMillis = millis();  
   }
   
   ArduinoOTA.handle();                        // listen for OTA events
   handleUDP();
-  
-  if ((millis() - loopMillis) > 30)
-    Serial.printf("Loop took %d millis\n", millis() - loopMillis);
+
+
 }
 
 void pushJson(){
 //  Serial.println("push Json");
   String st = getJsonString();
-//  Serial.println (st);
   webSocket.broadcastTXT(st.c_str(), st.length());
 }
 
@@ -394,7 +382,6 @@ void saveSettings(){
   f.write((const char *)&(timeOffset),sizeof(timeOffset));
   f.write((const char *)&(devices),sizeof(devices));
   f.close();  
-  updateGui = true;
 }
 
 void restoreSettings() {
@@ -410,7 +397,6 @@ void restoreSettings() {
   }
   Serial.println("---End Restore"); 
   f.close(); 
-  updateGui = true;
 }
 
 void clearDevices() {
@@ -449,7 +435,7 @@ void startOTA() { // Start the OTA service
   ArduinoOTA.setPassword(OTAPassword);
 
   ArduinoOTA.onStart([]() {
-  Serial.println("Start");
+    Serial.println("Start");
 //    digitalWrite(LED_RED, 0);    // turn off the LEDs
 //    digitalWrite(LED_GREEN, 0);
 //    digitalWrite(LED_BLUE, 0);
@@ -538,14 +524,12 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           if ((int)devices[deviceIndex].sensor[0] != (int)keyValue.value()) {
             devices[deviceIndex].sensor[0] = keyValue.value();
             devices[deviceIndex].deviceTime = getTime();
-            save = true;
             updateGui = true;
          }
         STRCASE("sensor1")
           if ((int)devices[deviceIndex].sensor[1] != (int)keyValue.value()) {
             devices[deviceIndex].sensor[1] = keyValue.value();
             devices[deviceIndex].deviceTime = getTime(); 
-            save = true;
             updateGui = true;
           }
         STRCASE("sensorSwap")
@@ -607,8 +591,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
   }, handleFileUpload);                       // go to 'handleFileUpload'
 
   server.on("/var.json",  HTTP_GET, []() {  // If a GET request is sent to the /var.json address,
-    Serial.println("HTTP_GET /var.json");
-    Serial.println(getJsonString());
     server.send(200, "application/json", getJsonString()); 
   });                                     // go to 'handleFileUpload'
   
@@ -626,8 +608,8 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
     {
       String data = server.arg("plain");
       deserializeJson(doc,data);
-      Serial.print ("Data = ");
-      Serial.println(data);
+//      Serial.print ("Data = ");
+//      Serial.println(data);
     }
     if (!doc.containsKey("mac")) {
       server.send(400,"text/plain", "Malformed Request, No MAC Address");
@@ -636,7 +618,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
     bool newDevice;
     int deviceIndex = getDeviceIndex(doc["mac"], &newDevice);
     devices[deviceIndex].timer = millis();
-//    Serial.println("Online set to 1");
     devices[deviceIndex].online = 1;
     for (int j=0; j<4;j++)
       devices[deviceIndex].ip[j] = server.client().remoteIP()[j];      // **** LOGAN - what's this for????
@@ -681,7 +662,7 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
         STRCASE("switchValue") {
           bool switchVal = (bool)keyValue.value();
           if (devices[deviceIndex].switchReverse) switchVal = !switchVal;          
-//          Serial.printf("switchVal %d, switchReverse %d\n", switchVal?1:0, devices[deviceIndex].switchReverse?1:0);
+          Serial.printf("switchVal %d, switchReverse %d\n", switchVal?1:0, devices[deviceIndex].switchReverse?1:0);
           if (devices[deviceIndex].switchValue != switchVal) devices[deviceIndex].deviceTime = getTime();
           devices[deviceIndex].switchValue = switchVal;
           if (devices[deviceIndex].switchValue && !devices[deviceIndex].latchValue) {
@@ -689,7 +670,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
             devices[deviceIndex].latchValue = true;
             devices[deviceIndex].latchTime = getTime();
           }
-          save = true;
           updateGui = true;
         }
       }     
@@ -996,14 +976,14 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
           parseCommand(command, &mac, &var, &val);
           setDevice(mac, var, val);                        
         }
-        break;              
+        break;      
         case '@': {     //used to increment & decrement time zone
           switch (payload[1]) {
             case '+': { timeOffset++; Serial.println("time inc"); } break;
             case '-': { timeOffset--; Serial.println("time dec"); } break;
           }                       
         }
-        break;                
+        break;        
         case '^': {     //used to update device with json string
           String json = (char *)payload;
           json.remove(0,1);                   
