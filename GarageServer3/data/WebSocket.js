@@ -22,6 +22,7 @@ var OFFLINE_BLUE = "#8080ff"
 var DEVICE_GARAGE = '1';
 var DEVICE_THERMOMETER = '2';
 var DEVICE_LATCH = '4';
+var DEVICE_BAT = '6';
 
 /********* GLOBAL VARIBLES ************/
 var timeOffset = 0;
@@ -36,14 +37,14 @@ connection.onerror = function (error) {
 };
 connection.onmessage = function (e) {
 	console.log ("Received pushed json");
-	console.log(json);
+//	console.log(e.data);
 	processJson(e.data);
 };
 connection.onclose = function(){
     console.log("WebSocket connection closed");
 };
 
-setInterval(getIntervalJson, 300000); // every 5 minutes
+setInterval(getIntervalJson, 10000); // every 10 seconds
 
 function mainButtonPressed(button) {
 	console.log('**** Button Pressed ******')
@@ -71,6 +72,10 @@ function getDeviceJson(device) {
 		devicejson['maxTemp'] = parseInt(document.getElementById("MAXTEMP"+device.mac).value); 
 		devicejson['celcius'] = document.getElementById("CELCIUS"+device.mac).checked?1:0;
 	}
+	if (device.deviceType == DEVICE_BAT) {
+		devicejson['startTime'] = parseInt(document.getElementById("MOTIONSTART"+device.mac).value); 
+		devicejson['stopTime'] = parseInt(document.getElementById("MOTIONSTOP"+device.mac).value); 
+	}	
 	return devicejson;
 }
 
@@ -167,7 +172,7 @@ function addDoorTextBox (device, container) {
 	
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		var min = document.createElement('input'); // min input		
-		min.style.width = '30px';
+		min.style.width = '40px';
 		min.style.height = '20px';
 		min.style.marginTop = '4px';
 		min.style.marginLeft = '0px';
@@ -182,12 +187,12 @@ function addDoorTextBox (device, container) {
 		min.value = device.minTemp;
 
 		var max = document.createElement('input'); // max input
-		max.style.width = '30px';
+		max.style.width = '40px';
 		max.style.height = '20px';
 		max.style.marginTop = '4px';
 		max.style.marginLeft = '2px';
 		max.style.marginRight = '10px';
-		min.style.marginBottom = '3px';
+		max.style.marginBottom = '3px';
 		max.style.textAlign = 'center';
 		max.style.borderRadius = '10px';
 		max.style.color = 'black';
@@ -214,11 +219,45 @@ function addDoorTextBox (device, container) {
 		var cel = document.createTextNode("\xB0C");
 	}
 
+	if (device.deviceType == DEVICE_BAT) {
+		var start = document.createElement('input'); // start time		
+		start.style.width = '45px';
+		start.style.height = '20px';
+		start.style.marginTop = '4px';
+		start.style.marginLeft = '5px';
+		start.style.marginRight = '5px';
+		start.style.marginBottom = '3px';
+		start.style.textAlign = 'center';
+		start.style.borderRadius = '10px';
+		start.style.color = 'black';
+		start.style.fontSize = '20px';
+		start.maxLength = 5;
+		start.id = 'MOTIONSTART' + device.mac;
+		start.value = device.startTime;
+
+		var stop = document.createElement('input'); // stop time
+		stop.style.width = '45px';
+		stop.style.height = '20px';
+		stop.style.marginTop = '4px';
+		stop.style.marginLeft = '5px';
+		stop.style.marginRight = '5px';
+		stop.style.marginBottom = '3px';
+		stop.style.textAlign = 'center';
+		stop.style.borderRadius = '10px';
+		stop.style.color = 'black';
+		stop.style.fontSize = '20px';
+		stop.maxLength = 5;
+		stop.id = 'MOTIONSTOP' + device.mac;
+		stop.value = device.stopTime;
+		
+		var starttext = document.createTextNode("Start Time ");
+		var stoptext = document.createTextNode("Stop Time");
+	}
 
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		var icon_therm = document.createElement('img');
-		icon_therm.src =  'https://api.iconify.design/openmoji:thermometer.svg';
-//		https://api.iconify.design/wi:thermometer.svg'; //?height=30&inline=false';
+//		icon_therm.src =  'https://api.iconify.design/openmoji:thermometer.svg';
+		icon_therm.src =  'https://api.iconify.design/ion:thermometer-outline.svg?color=%230099ff';
 		icon_therm.style.width = '30px';
 		icon_therm.style.height = '30px';
 		icon_therm.style.verticalAlign = '-5px';
@@ -238,7 +277,9 @@ function addDoorTextBox (device, container) {
 	}	
 	if (device.deviceType == DEVICE_LATCH) {
 		var icon_latch = document.createElement('img');
-		icon_latch.src =  'https://api.iconify.design/noto:open-mailbox-with-raised-flag.svg';
+//		icon_latch.src =  'https://api.iconify.design/noto:open-mailbox-with-raised-flag.svg';
+		icon_latch.src =  'https://api.iconify.design/mdi:electric-switch.svg?color=%230099ff';
+
 //		https://api.iconify.design/emojione-monotone:closed-mailbox-with-raised-flag.svg';
 		icon_latch.style.width = '30px';
 		icon_latch.style.height = '30px';
@@ -246,12 +287,26 @@ function addDoorTextBox (device, container) {
 		icon_latch.style.backgroundColor = WHITE;
 		container.appendChild(icon_latch);
 	}	
-
+	if (device.deviceType == DEVICE_BAT) {
+		var icon_bat = document.createElement('img');
+//		icon_bat.src =  'https://api.iconify.design/noto:bat.svg';
+		icon_bat.src =  'https://api.iconify.design/mdi:motion-sensor.svg?color=%230099ff';		
+		icon_bat.style.width = '30px';
+		icon_bat.style.height = '30px';
+		icon_bat.style.verticalAlign = '-5px';
+		icon_bat.style.backgroundColor = WHITE;
+		icon_bat.setAttribute("mac",device.mac);
+		icon_bat.onclick = function() {
+			pirSettings(icon_bat);
+		};	
+		container.appendChild(icon_bat);
+	}	
 
 	var tb = document.createElement('input'); // Create Text Box
 	if (device.deviceType == DEVICE_GARAGE) tb.style.width = screenWidth - 140 + 'px'; //"150px"; //220px";  //container.style.width - b1.style.width; //  '95%';
 	if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = screenWidth - 140 + 'px'; //'95%';
 	if (device.deviceType == DEVICE_LATCH) tb.style.width = screenWidth - 140 + 'px';
+	if (device.deviceType == DEVICE_BAT) tb.style.width = screenWidth - 140 + 'px';
 
 	tb.style.height = '40px';
 	tb.style.marginTop = '2px';
@@ -287,11 +342,16 @@ function addDoorTextBox (device, container) {
 		container.appendChild(cel);
 		container.appendChild(celcius);
 	}
+	if (device.deviceType == DEVICE_BAT) {
+		container.appendChild(br);
+		container.appendChild(starttext);		
+		container.appendChild(start);
+		container.appendChild(stoptext);
+		container.appendChild(stop);
+	}
 }
 
-function buttonPress(image){
-	console.log ('Button press...' + image.getAttribute('mac'));
-}
+
 
 function loadMainControls() {
 	var i;
@@ -308,12 +368,12 @@ function loadMainControls() {
 	}
 	json = getJson();	//reload json to get button text
 }
-
+/*
 function loadMainControls2() {
 	bloadControls = true;
 }
-
-function timeString(time) {
+*/
+function timeString(time, withSeconds) {
 
 	var currDate = new Date(time * 1000);
 	currDate.setHours(currDate.getHours() + timeOffset);
@@ -322,10 +382,13 @@ function timeString(time) {
 	var day = currDate.getUTCDate().toString();
 	var hour = currDate.getUTCHours().toString();
 	var minutes = currDate.getUTCMinutes().toString();
+	var sec = currDate.getUTCSeconds().toString();
 	while (minutes.length < 2) minutes = '0' + minutes;
 	while (hour.length < 2) hour = '0' + hour;
+	while (sec.length < 2) sec = '0' + sec;
 
 	var formattedTime = month + '/' + day + ' ' + hour + ':' + minutes;
+	if (withSeconds === 'true') formattedTime = formattedTime + ':' + sec;
 
 	return formattedTime;
 }
@@ -528,6 +591,10 @@ function setScreenWidth() {
 	if (screenWidth > 410) screenWidth = 410;
 }
 
+String.prototype.insertAt=function(charsToInsert,position){
+	return this.slice(0,position) + charsToInsert + this.slice(position)
+}
+
 function loadSettingsControls() {
 	console.log("**** loadSettingsControls ****")
 	setScreenWidth();
@@ -537,6 +604,65 @@ function loadSettingsControls() {
  	var json = getJson();
 	createSettingsTable();
 	displayTime();
+}
+
+function getParams (url) {
+	var params = {};
+	var parser = document.createElement('a');
+	parser.href = url;
+	var query = parser.search.substring(1);
+	var vars = query.split('&');
+	for (var i = 0; i < vars.length; i++) {
+		var pair = vars[i].split('=');
+		params[pair[0]] = decodeURIComponent(pair[1]);
+	}
+	return params;
+}
+
+function loadPirLog() {
+	console.log("**** loadPirControls ****");
+	getJson();
+	var params = getParams(window.location.href);
+	console.log('params.log = ', params.log);
+	var st = getFile(params.log);
+//	console.log("st = ", st)
+	if (st.includes('404:')) st = "Log File is Empty"; 
+	else {
+		st = st.replace(/B:/g,'');
+		var dates = st.split('\n');
+		st = "";
+		for (var i=dates.length - 1; i>-1; i--) {
+			if (dates[i].length > 5) st = st + timeString(dates[i],'true') + '</br>';
+		}
+		st = 'Motion Detected:</br>' + st;
+	}
+	document.getElementById("pir_log").innerHTML = st;
+}
+
+function clearLog() {
+	console.log('**** Clear Log ******');
+//	console.log ('Button.id = ' + button.id + ' mac = ' + button.getAttribute('mac'));
+	var params = getParams(window.location.href);
+	var ip = params.log.substring(params.log.indexOf('/log') + 4,params.log.indexOf('.txt'));
+	for (i=10; i>0; i=i-2) ip = ip.insertAt(':',i);
+	console.log ('ip = ',ip);
+
+	devicejson = {};
+	devicejson['mac'] = ip;
+	devicejson['deleteLog'] = 99;	
+	var st = JSON.stringify(devicejson);
+	console.log("deleteLog json = " + st);
+	connection.send('^' + st);
+	location.reload();
+}
+
+var pirString = "";
+
+function pirSettings(button) {
+	console.log ('Button press...' + button.getAttribute('mac'));
+	var st = '/log' + button.getAttribute('mac').replace(/:/g,'') + '.txt';
+	console.log (st);
+	window.location.href = '/pir.html?log=' + st;
 }
 
 function getDeviceColor(device){
@@ -577,11 +703,24 @@ function getDeviceColor(device){
 			if (device.switchValue == 1) return OFFLINE_RED; else return OFFLINE_GREEN;
 		}
 	}
-}
+	if (device.deviceType == DEVICE_BAT) {
+		if (device.online) {
+			return GREEN;
+		} else {
+			return OFFLINE_GREEN;
+		}
+	}}
 
 function getIntervalJson() {
 	console.log("getIntervalJson()");
 	getJson();
+}
+
+function getFile(fileName) {
+    var Httpreq = new XMLHttpRequest(); // a new request
+    Httpreq.open("GET",fileName,false);
+    Httpreq.send(null);
+	return Httpreq.responseText;
 }
 
 function getJson(){
@@ -597,29 +736,7 @@ function getJson(){
 	return;
 }
 
-function getJson99(){
-	return pushedJson;
-}
-
-function getJson2() { 
-	return new Promise(function(resolve,reject) {
-		
-	});
-
-}
-
-async function getJson1(){
-	try{
-		var json = await getJson2();
-		console.log(json);
-		return json;
-
-	}
-	catch(error) {
-		console.log(error);
-	}
-}
-
+/*
 function get(url) {
 	// Return a new promise.
 	return new Promise(function(resolve, reject) {
@@ -650,19 +767,7 @@ function get(url) {
 	  req.send();
 	});
   }
-
-function getJson8() {
-	get('/var.json').then(function(response) {
-		console.log("Success!");
-		return JSON.parse(response);
-//		console.log(json);
-		return json;
-	}, function(error) {
-		console.error("Failed!", error);
-	});
-
-}
-
+*/
 
 function processJson(jsonString){
 
@@ -707,7 +812,7 @@ function processJson(jsonString){
 					var deviceTime = timeString(json.devices[i].deviceTime);
 					var degC = Math.round(json.devices[i].temp / 100) + "\xB0 C";
 					var degF = Math.round( ((json.devices[i].temp / 100) * 9/5) + 32) + "\xB0 F";
-					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degC + ' / ' + degF + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
+					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degF + ' / ' + degC + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 				}
 				if (json.devices[i].deviceType == DEVICE_LATCH) {		
@@ -717,17 +822,23 @@ function processJson(jsonString){
 					if (json.devices[i].latchValue == 0) {
 						button.style.backgroundColor = GREEN;
 						st = "Closed since " + deviceTime;
-//						st = "Closed since " + deviceTime;
 					} else {
 						button.style.backgroundColor = RED;
 						st = "Opened " + latchTime + " (Currently ";
 						if (json.devices[i].switchValue == 1) st += "open)"; else st += "closed)";
-//						st = "Opened " + latchTime;
 					}
 
 					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + "</p>";
 					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
 				}
+				if (json.devices[i].deviceType == DEVICE_BAT) {	
+					button.style.backgroundColor = getDeviceColor(json.devices[i]);	
+					var deviceTime = timeString(json.devices[i].deviceTime);
+					var st = "Last Detection @ " + deviceTime;
+					if (json.devices[i].alarmState == 0) st = "(OFF) " + st; else st = "(ON) " + st;
+					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + "</p>";
+					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + st + "</p>";
+				}			
 			}
 			var swapbutton = document.getElementById('swap' + json.devices[i].mac);
 			if (swapbutton != null) {

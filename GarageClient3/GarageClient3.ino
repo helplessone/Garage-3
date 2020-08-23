@@ -1,6 +1,7 @@
-#define SENSOR_TYPE DEVICE_GARAGE
-//#define SENSOR_TYPE DEVICE_THERMOMETER
+//#define SENSOR_TYPE DEVICE_GARAGE
+#define SENSOR_TYPE DEVICE_THERMOMETER
 //#define SENSOR_TYPE DEVICE_LATCH
+//#define SENSOR_TYPE DEVICE_BAT
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -13,12 +14,32 @@
 
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
+//#include <ESP8266mDNS.h>
 #include <WiFiClient.h>
 #include <WiFiUdp.h>              //For UDP 
 #include <ArduinoJson.h>
 
+WiFiManager wifiManager;
+WiFiUDP Udp;
+ESP8266WebServer server(80);
+
+/*
+#ifndef GARAGE_UDP
+  #define UDP_PORT 4204
+  #define MAX_UDP_SIZE 255
+#endif
+*/
+
+#ifndef LED_BUILTIN
+  #define LED_BUILTIN 2
+#endif
+
+#ifndef D0
+  #define D0 16
+#endif
 
 #if SENSOR_TYPE == DEVICE_THERMOMETER
+  #define deviceTypeString "THERMO"
   #include <OneWire.h>
   #include <DallasTemperature.h>
   // Data wire is plugged into digital pin 2 on the Arduino
@@ -30,59 +51,47 @@
   float currentTemp = 0.0;
 #endif
 
-  bool forceUpdate = false;
-
-//ESP8266WiFiMulti WiFiMulti;
-WiFiManager wifiManager;
-WiFiUDP Udp;
-ESP8266WebServer server(80); 
-const char *OTAName = "ESP8266";  // A name and a password for the OTA service
-const char *OTAPassword = "";     //"esp8266";
-
-
-#ifndef GARAGE_UDP
-  #define UDP_PORT 4204
-  #define MAX_UDP_SIZE 255
-#endif
-
-#ifndef LED_BUILTIN
-  #define LED_BUILTIN 2
-#endif
-
-#ifndef D0
-  #define D0 16
-#endif
-
 #if SENSOR_TYPE == DEVICE_GARAGE
-  #define DOORUP 5      //Input: 0 if door is up (NodeMCU D1)
-  #define DOORDOWN 4    //Input: 0 if door is down (NodeMCU D2)
-  #define DOORBUTTON 14 //Output: set HIGH to activate garage door
-#endif
-
-#if SENSOR_TYPE == DEVICE_LATCH
-  #define SWITCH 4      //Input: 0 if door is up (NodeMCU D2)
-#endif
-
-#define LED D0
-
-#if SENSOR_TYPE == DEVICE_GARAGE
+  #define deviceTypeString "GARAGE"
+  #define DOORUP 5      // (D1) Input: 0 if door is up
+  #define DOORDOWN 4    // (D2) Input: 0 if door is down
+  #define DOORBUTTON 14 // (D5) Output: set HIGH to activate garage door
   int doorUp, doorDown;
 #endif
 
 #if SENSOR_TYPE == DEVICE_LATCH
+  #define deviceTypeString "LATCH"
+  #define SWITCH 4      // (D2) Input: 0 if door is up
   bool switchValue;
 #endif
 
+#if SENSOR_TYPE == DEVICE_BAT
+  #define deviceTypeString "BAT"
+  #define PIR 4         // (D2) Input from PIR sensor
+  #define BAT_ALARM 14  // (D5) Output: set HIGH to activate external alarm
+  bool pirValue;
+  unsigned long batTimer;
+  byte alarmState;
+  byte alarmRepeat;
+#endif
+
+#define LED D0
+
 bool startup = true;
+bool forceUpdate = false;
+char OTAName[15];  // A name and a password for the OTA service
+const char *OTAPassword = "";     //"esp8266";
 String macID = "";
 IPAddress serverIP;
+IPAddress myIP;
 unsigned long heartbeat = 0;
 
 /************************  SETUP ************************/
 void setup() {
   pinMode(LED, OUTPUT);
   digitalWrite(LED,HIGH);
-  SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
+//  SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
+  
   
 #if SENSOR_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
@@ -102,6 +111,14 @@ void setup() {
   switchValue = digitalRead(SWITCH);
 #endif 
 
+#if SENSOR_TYPE == DEVICE_BAT
+  pinMode(PIR, INPUT);
+  pinMode(BAT_ALARM, OUTPUT);
+  digitalWrite (BAT_ALARM, LOW);  //Turn off alarm  
+  pirValue = 0; //digitalRead(PIR);
+  alarmState = 0;
+#endif 
+
   macID = WiFi.macAddress();
 
   Serial.begin(115200);
@@ -118,12 +135,16 @@ void setup() {
   } 
 
   startWiFi(); 
+  myIP = WiFi.localIP();
+  sprintf(OTAName, "%s_%03d",deviceTypeString,myIP[3]);
+  
   startOTA();                  // Start the OTA service
   displayInfo();
   Udp.begin(UDP_PORT);         // Start listening for UDP
   startServer();
-
 }
+
+//unsigned long MDNStimer = millis();
 
 void loop() {
   handleStatusUpdate();  
@@ -131,6 +152,12 @@ void loop() {
   handleUDP();
   server.handleClient();
   delay(1);
+/*  
+  if (millis() - MDNStimer > 5000) { //update MDNS every 5 seconds
+    MDNS.update();
+    MDNStimer = millis();
+  }  
+*/  
 }
 
 void handleStatusUpdate() {
@@ -147,24 +174,29 @@ void handleStatusUpdate() {
     if (!(startup || forceUpdate || (millis() - heartbeat > 10000) || 
           (abs(currentTemp - f) > 1.0 ))) return;
     if (abs(currentTemp - f) > 1.0 ) Serial.println("Forced temp update"); 
-    if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
+//    if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
     currentTemp = f; 
 #endif
 #if SENSOR_TYPE == DEVICE_LATCH 
   if (!(startup || (millis() - heartbeat > 10000) || forceUpdate ||
                    (switchValue != digitalRead(SWITCH)))) return;
+  switchValue = digitalRead(SWITCH);                   
 #endif
-  forceUpdate = false;                                 
-  displayInfo();
-  heartbeat = millis();
+#if SENSOR_TYPE == DEVICE_BAT
+  processBatAlarm(); 
+  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate)) return;
+#endif  
+
 #if SENSOR_TYPE == DEVICE_GARAGE  
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
 #endif  
-#if SENSOR_TYPE == DEVICE_LATCH
-  switchValue = digitalRead(SWITCH);
-#endif   
+
   startup = false;
+  forceUpdate = false;                                 
+
+  displayInfo();
+  heartbeat = millis(); 
   
   HTTPClient http;
   http.begin("http://"+serverIP.toString()+"/var.json"); 
@@ -179,7 +211,6 @@ void handleStatusUpdate() {
     json["sensor1"] = doorDown;
   #endif
   #if SENSOR_TYPE == DEVICE_THERMOMETER  
-//    sensors.requestTemperatures();
     int temp =  (int)(currentTemp * 100);
     json["temp"] = temp;
     Serial.print("temp = ");
@@ -189,6 +220,10 @@ void handleStatusUpdate() {
   #if SENSOR_TYPE == DEVICE_LATCH  
     json["switchValue"] = switchValue?1:0;
   #endif
+  #if SENSOR_TYPE == DEVICE_BAT
+    json["pirValue"] = pirValue?1:0;
+    json["alarmState"] = alarmState;
+  #endif  
   
   serializeJsonPretty(json,st);
   Serial.println(st);
@@ -208,6 +243,61 @@ void handleStatusUpdate() {
   }
 }
 
+#if SENSOR_TYPE == DEVICE_BAT
+void processBatAlarm(){
+  if (pirValue != digitalRead(PIR)) forceUpdate = true;
+  pirValue = digitalRead(PIR);
+  switch (alarmState) {
+
+/*    
+    case 0: {
+      if (pirValue == 1) {
+        digitalWrite(BAT_ALARM,HIGH); //turn on alarm
+        digitalWrite(LED,LOW); //turn on on-board LED        
+        Serial.println("State 0 -> 1");
+        alarmState = 1;
+        alarmRepeat = 0;
+        batTimer = millis();
+      }
+    }
+    break;
+*/    
+    case 1: {
+      if (millis() - batTimer > 10800000) {     // 10800000 = 3 hours   
+        Serial.println("State 1 -> 0");
+        alarmState = 0;
+        batTimer = millis();
+        digitalWrite(BAT_ALARM,LOW); //turn off alarm
+        digitalWrite(LED,HIGH); //turn off on-board LED        
+      }
+    }
+    break;
+    case 2: {
+      if (millis() - batTimer > 100) {
+        if (alarmRepeat++ < 3) {
+          Serial.println("State 2 -> 1");
+          batTimer = millis();
+          alarmState = 1;
+          digitalWrite(BAT_ALARM,HIGH);  
+          digitalWrite(LED,LOW);    //turn on on-board LED        
+        } else {
+          Serial.println("State 2 -> 3");
+          batTimer = millis();
+          alarmState = 3;
+        }
+      }
+    }
+    break;
+    case 3: {
+      if (millis() - batTimer > 100) {
+        Serial.println("State 3 -> 0");
+        alarmState = 0;
+      }
+    }
+  }
+}
+#endif
+
 void startWiFi() {
   digitalWrite(LED,LOW);
 #if SENSOR_TYPE == DEVICE_GARAGE   
@@ -217,9 +307,12 @@ void startWiFi() {
   wifiManager.autoConnect("Temperature Sensor");
 #endif
 #if SENSOR_TYPE == DEVICE_LATCH   
-  wifiManager.autoConnect("Latch Sensor");
+  wifiManager.autoConnect("Switch Sensor");
 #endif
-  digitalWrite(LED,HIGH);
+#if SENSOR_TYPE == DEVICE_BAT   
+  wifiManager.autoConnect("Motion Sensor");
+#endif
+digitalWrite(LED,HIGH);
 }
 
 void displayInfo() {
@@ -268,6 +361,7 @@ void handleUDP() {
     Udp.write(LINK_MESSAGE);
     Udp.endPacket();
   }
+  
   if (strcmp(incomingPacket, LINKED_MESSAGE)==0) { // I have been linked to server 
     serverIP = Udp.remoteIP();
   }
@@ -317,6 +411,7 @@ void startServer() {
       if (server.arg(i).equals(ACTION_MESSAGE)) {
         digitalWrite(LED,LOW);
         server.send(HTTP_CODE_OK);
+        
 #if SENSOR_TYPE == DEVICE_THERMOMETER
         delay (200); //let the LED blink
         forceUpdate = true;
@@ -331,11 +426,61 @@ void startServer() {
         delay(200);   //just blink the LED
         forceUpdate = true;
 #endif
+#if SENSOR_TYPE == DEVICE_BAT
+        if (alarmState == 0) { //toggle alarm
+          digitalWrite(BAT_ALARM,HIGH);   //force a bat alarm
+          Serial.println("Forced State 0 -> 1");
+          batTimer = millis();        
+          alarmState = 1;
+        } else {
+          digitalWrite(BAT_ALARM,LOW);   //turn off bat alarm
+          Serial.println("Forced State to 0");
+          alarmState = 0;
+         
+        }
+        alarmRepeat = 0;
+        delay(200);   //just blink the LED
+        forceUpdate = true; 
+#endif
         digitalWrite(LED,HIGH);  //turn LED Off
         return;
       }
       server.send(HTTP_CODE_BAD_REQUEST);
     }
   });
+
+    server.on("/alarm", HTTP_POST, []() {
+    for (int i = 0; i < server.args(); i++) {
+      Serial.println(server.arg(i));
+      if (server.arg(i).equals(ACTION_MESSAGE)) {
+        digitalWrite(LED,LOW);
+        server.send(HTTP_CODE_OK);
+        
+#if SENSOR_TYPE == DEVICE_BAT
+        if (alarmState == 0) { // if alarm is off, turn it on
+          digitalWrite(BAT_ALARM,HIGH);   //force a bat alarm
+          Serial.println("Forced State 0 -> 1");
+          batTimer = millis();        
+          alarmState = 1;  
+          alarmRepeat = 0;
+          delay(200);   //just blink the LED
+          forceUpdate = true;
+        } 
+ #endif
+        digitalWrite(LED,HIGH);  //turn LED Off
+        return;
+      }
+      server.send(HTTP_CODE_BAD_REQUEST);
+    }
+  });  
   server.begin();
 }
+
+/*
+void startMDNS() { // Start the mDNS responder
+  MDNS.begin(mdnsName);                        // start the multicast domain name server
+  Serial.print("mDNS responder started: http://");
+  Serial.print(mdnsName);
+  Serial.println(".local");
+}
+*/
