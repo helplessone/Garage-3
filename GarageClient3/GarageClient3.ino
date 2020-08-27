@@ -1,7 +1,8 @@
 //#define SENSOR_TYPE DEVICE_GARAGE
-#define SENSOR_TYPE DEVICE_THERMOMETER
+//#define SENSOR_TYPE DEVICE_THERMOMETER
 //#define SENSOR_TYPE DEVICE_LATCH
 //#define SENSOR_TYPE DEVICE_BAT
+#define SENSOR_TYPE DEVICE_CURTAIN
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -11,6 +12,7 @@
 //#include <ESP8266WiFiMulti.h>
 #include <ArduinoOTA.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+#include <FS.h>
 
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
@@ -18,7 +20,7 @@
 #include <WiFiClient.h>
 #include <WiFiUdp.h>              //For UDP 
 #include <ArduinoJson.h>
-
+             
 WiFiManager wifiManager;
 WiFiUDP Udp;
 ESP8266WebServer server(80);
@@ -37,6 +39,8 @@ ESP8266WebServer server(80);
 #ifndef D0
   #define D0 16
 #endif
+
+Device device;
 
 #if SENSOR_TYPE == DEVICE_THERMOMETER
   #define deviceTypeString "THERMO"
@@ -75,6 +79,20 @@ ESP8266WebServer server(80);
   byte alarmRepeat;
 #endif
 
+#if SENSOR_TYPE == DEVICE_CURTAIN
+  #define deviceTypeString "CURTAIN"
+  #define SWITCH 5      // (D1) Input from SWITCH (curtain up)
+  #define IR 4          // (D2) Input from IR sensor
+  #define MOTOR 14      // (D5) Output: HIGH=Motor On, LOW=Motor Off
+  #define REVERSE 12    // (D6) Output - Reverses motor direction
+  #define UP 1          //currentDirection UP
+  #define DOWN 0        //currentDirection DOWN
+  int irValue;
+  int currentDirection = 0; //UP or DOWN
+  bool motorRunning;
+  bool manualOverride = false;
+#endif
+
 #define LED D0
 
 bool startup = true;
@@ -90,8 +108,9 @@ unsigned long heartbeat = 0;
 void setup() {
   pinMode(LED, OUTPUT);
   digitalWrite(LED,HIGH);
-//  SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
+  SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
   
+  restoreDevice();  
   
 #if SENSOR_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
@@ -118,6 +137,17 @@ void setup() {
   pirValue = 0; //digitalRead(PIR);
   alarmState = 0;
 #endif 
+
+#if SENSOR_TYPE == DEVICE_CURTAIN
+  pinMode(IR, INPUT);
+  pinMode(SWITCH,INPUT_PULLUP);
+  pinMode(MOTOR, OUTPUT);
+  digitalWrite(MOTOR,LOW);
+  delay(50);
+  pinMode(REVERSE, OUTPUT);
+  motorOff();
+  irValue = digitalRead(IR);
+#endif
 
   macID = WiFi.macAddress();
 
@@ -152,12 +182,6 @@ void loop() {
   handleUDP();
   server.handleClient();
   delay(1);
-/*  
-  if (millis() - MDNStimer > 5000) { //update MDNS every 5 seconds
-    MDNS.update();
-    MDNStimer = millis();
-  }  
-*/  
 }
 
 void handleStatusUpdate() {
@@ -185,8 +209,14 @@ void handleStatusUpdate() {
 #if SENSOR_TYPE == DEVICE_BAT
   processBatAlarm(); 
   if (!(startup || (millis() - heartbeat > 10000) || forceUpdate)) return;
-#endif  
-
+#endif 
+ 
+#if SENSOR_TYPE == DEVICE_CURTAIN
+  processCurtain(); 
+  if (motorRunning) return;
+  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate)) return;
+#endif
+  
 #if SENSOR_TYPE == DEVICE_GARAGE  
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
@@ -224,13 +254,17 @@ void handleStatusUpdate() {
     json["pirValue"] = pirValue?1:0;
     json["alarmState"] = alarmState;
   #endif  
-  
+  #if SENSOR_TYPE == DEVICE_CURTAIN
+    json["currentPosition"] = device.currentPosition;
+    json["rotationCount"] = device.rotationCount;
+    json["motorReverse"] = device.motorReverse;
+  #endif   
   serializeJsonPretty(json,st);
-  Serial.println(st);
+//  Serial.println(st);
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
-    Serial.printf("[HTTP] POST code: %d\n", httpCode);
+//    Serial.printf("[HTTP] POST code: %d\n", httpCode);
 
     // file found at server
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
@@ -242,6 +276,79 @@ void handleStatusUpdate() {
     findServer();
   }
 }
+
+#if SENSOR_TYPE == DEVICE_CURTAIN
+void motorOn(){
+  Serial.printf("Motor ON: Direction = %d, Reverse = %d\n",currentDirection, device.motorReverse);
+  if (device.motorReverse == 0) {
+    if (currentDirection == DOWN) {
+      digitalWrite(REVERSE,LOW); 
+    } else {
+      digitalWrite(REVERSE,HIGH);
+    }
+  } else {
+    if (currentDirection == DOWN) {
+      digitalWrite(REVERSE,HIGH); 
+    } else {
+      digitalWrite(REVERSE,LOW);
+    }   
+  }
+  delay(50);
+  digitalWrite(MOTOR,HIGH);
+  motorRunning = true;
+}
+
+void motorOff() {
+  Serial.println("Motor OFF");
+  digitalWrite(MOTOR,LOW);
+  delay(50);
+  digitalWrite(REVERSE,LOW);
+  motorRunning = false;
+  forceUpdate = true;
+}
+
+void processCurtain(){
+  int cnt = 0;
+  if (currentDirection == UP && digitalRead(SWITCH) == 0) {
+    motorOff();
+    device.currentPosition = 0;
+    manualOverride = false;
+    return;
+  }
+  if (irValue != digitalRead(IR)) {
+    for (int i=0; i<30; i++) {
+      if (irValue != digitalRead(IR)) cnt++;
+      delay(1);
+    }
+    if (cnt > 25) {
+        irValue = digitalRead(IR);
+        if (irValue == 1) {
+          if (currentDirection == DOWN) {
+            device.currentPosition++;
+            if (device.currentPosition >= device.rotationCount && !manualOverride) {
+              motorOff(); 
+              forceUpdate = true;
+            }
+            saveDevice();
+          } else {
+            device.currentPosition--;
+            if (!manualOverride) {
+              if (device.currentPosition <= -8) { // This shouldn't happen, switch should cut it off
+                Serial.println("Error, switch not hit");
+                motorOff(); 
+                device.currentPosition = 0;
+                forceUpdate = true;
+              }
+            }
+            saveDevice();          
+          }
+          Serial.printf("  Position = %d\n",device.currentPosition);
+        }
+//        Serial.printf("ir Value = %d\n",irValue);
+    }
+  }
+}
+#endif
 
 #if SENSOR_TYPE == DEVICE_BAT
 void processBatAlarm(){
@@ -311,6 +418,9 @@ void startWiFi() {
 #endif
 #if SENSOR_TYPE == DEVICE_BAT   
   wifiManager.autoConnect("Motion Sensor");
+#endif
+#if SENSOR_TYPE == DEVICE_CURTAIN   
+  wifiManager.autoConnect("Curtain");
 #endif
 digitalWrite(LED,HIGH);
 }
@@ -407,7 +517,7 @@ void findServer() {
 void startServer() {
   server.on("/", HTTP_POST, []() {
     for (int i = 0; i < server.args(); i++) {
-      Serial.println(server.arg(i));
+      Serial.printf("server.on : %s\n", server.arg(i).c_str());
       if (server.arg(i).equals(ACTION_MESSAGE)) {
         digitalWrite(LED,LOW);
         server.send(HTTP_CODE_OK);
@@ -442,6 +552,22 @@ void startServer() {
         delay(200);   //just blink the LED
         forceUpdate = true; 
 #endif
+#if SENSOR_TYPE == DEVICE_CURTAIN
+        Serial.printf("motorRunning = %d\n",motorRunning);
+        if (motorRunning) motorOff();
+        else {
+          if (device.currentPosition <= 0) { //if up, put it down
+            currentDirection = DOWN; 
+            motorOn(); 
+            Serial.printf("<=0 Direction: %d, Position: %d, Running: %d\n",currentDirection,device.currentPosition, motorRunning);
+          } 
+          if (device.currentPosition > 0) {
+            currentDirection = UP;
+            motorOn();     
+            Serial.printf(">0 Direction: %d, Position: %d, Running: %d\n",currentDirection,device.currentPosition, motorRunning);
+          }
+        }
+#endif       
         digitalWrite(LED,HIGH);  //turn LED Off
         return;
       }
@@ -472,8 +598,71 @@ void startServer() {
       }
       server.send(HTTP_CODE_BAD_REQUEST);
     }
-  });  
+  });
+
+  server.on("/set", HTTP_POST, []() {
+    String Name, Value;
+    for (int i = 0; i < server.args(); i++) {
+      if (server.argName(i).equals("plain")) {
+        Name = getArgName(server.arg(i));
+        Value = getArgValue(server.arg(i));
+        Serial.printf("Name = |%s|, Value = |%s|\n",Name.c_str(),Value.c_str());
+
+        if (Name.equals("rotationCount")) device.rotationCount = Value.toInt();
+        if (Name.equals("motorReverse")) {
+          device.motorReverse = !device.motorReverse;
+          forceUpdate = true;
+        }
+        if (Name.equals("lowerCurtain")) lowerCurtain();
+        if (Name.equals("raiseCurtain")) raiseCurtain();
+        
+        if (Name.equals("downButton")) {
+          manualOverride = true;
+          currentDirection = DOWN;
+          motorOn();          
+        }
+        if (Name.equals("upButton")) {
+          manualOverride = true;
+          currentDirection = UP;
+          motorOn();          
+        }
+        if (Name.equals("stopButton")) motorOff();
+        if (Name.equals("setBottom")) {
+          device.rotationCount = device.currentPosition;
+          saveDevice();
+        }
+        
+
+        Serial.printf("rotationCount = %d\n",device.rotationCount);        
+      }
+    }
+    server.send(HTTP_CODE_OK);
+    saveDevice();
+  });
+  
   server.begin();
+}
+
+void lowerCurtain(){
+  if (device.currentPosition <= 0) { //if up, put it down
+    currentDirection = DOWN; 
+    motorOn(); 
+  }  
+}
+
+void raiseCurtain(){
+  if (device.currentPosition > 0) {
+    currentDirection = UP;
+    motorOn();     
+  }   
+}
+
+String getArgName (String st) {
+  return (st.substring(0,st.indexOf('=')));  
+}
+
+String getArgValue (String st) {
+  return (st.substring(st.indexOf('=')+1,st.length()));    
 }
 
 /*
@@ -484,3 +673,39 @@ void startMDNS() { // Start the mDNS responder
   Serial.println(".local");
 }
 */
+
+void clearDevice() {
+  memset(&device, '\0', sizeof(Device));   //clear devices array to 0's
+  device.deviceType = SENSOR_TYPE;
+  device.online = 0;
+  device.timer = millis();
+#if SENSOR_TYPE == DEVICE_CURTAIN  
+  device.currentPosition = 0;
+  device.rotationCount = 0;
+  device.upTime = 0;
+  device.downTime = 0;
+#endif  
+} 
+
+void deleteSettings(){
+  SPIFFS.remove("/devices.txt");
+  Serial.println ("/devices.txt deleted");
+  clearDevice();
+  ESP.reset();
+}
+
+void saveDevice(){
+  File f = SPIFFS.open("/devices.txt","w");
+  if (!f) return;
+  f.write((const char *)&(device),sizeof(device));
+  f.close();  
+}
+
+void restoreDevice() {
+  char buffer[sizeof(Device)];
+  clearDevice();
+  File f = SPIFFS.open("/devices.txt","r");
+  if (!f) return;
+  f.readBytes((char *)&(device),sizeof(device));
+  f.close(); 
+}

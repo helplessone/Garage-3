@@ -14,9 +14,6 @@
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 #include <WiFiUdp.h>               //For UDP 
-//#include <time.h>                       // time() ctime()
-//#include <sys/time.h>                   // struct timeval
-//#include <coredecls.h>                  // settimeofday_cb()
 
 //ESP8266WiFiMulti wifiMulti;       // Create an instance of the ESP8266WiFiMulti class, called 'wifiMulti'
 
@@ -97,7 +94,7 @@ unsigned long checkCloseDelayMillis = millis();
 unsigned long closeStateTimer = 0;
 unsigned long getRealTimeMillis = millis();
 unsigned long offlineTimer = millis();
-// unsigned long clientRefreshTimer = millis();
+unsigned long checkCurtainsTimer = millis();
 
 unsigned long testMillis = millis();
 int hue = 0;
@@ -155,12 +152,7 @@ void setup() {
 /*__________________________________________________________LOOP__________________________________________________________*/
 
 void loop() {
-//  unsigned long loopMillis = millis();
-//  SPIFFS.remove("/devices.txt");
-//  delay(500);
-//  return;
-//  delay(0);
-  
+ 
   bool alarm = false;
 
   if (updateGui) {    
@@ -210,29 +202,6 @@ void loop() {
       }
     }  
   } 
-/* I think the following code was for debug??
- *  
-  if (millis() - testMillis > 2000) {
-    testMillis = millis();
-    int mint, maxt;
-    for (int i=0; i<MAX_DEVICES; i++) {
-      if (devices[i].deviceType == DEVICE_THERMOMETER) {
-//        displayDevice(i);
-        
-        if (devices[i].celcius) {
-          mint = devices[i].minTemp * 100;
-          maxt = devices[i].maxTemp * 100;
-
-        } else {
-          mint = (int)(float(devices[i].minTemp-32) * 5 / 9 * 100); // * (5/9)* 100;
-          maxt = (int)(float(devices[i].maxTemp-32) * 5 / 9 * 100); // * (5/9)* 100;      
-        }        
-//        Serial.printf("Device %d, temp = %d, min = %d, max = %d, devicemin = %d, devicemax = %d\n",i,devices[i].temp,mint,maxt,devices[i].minTemp,devices[i].maxTemp);
-        
-      }
-    }
-  }
-*/  
 
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
   
@@ -297,6 +266,11 @@ void loop() {
     }
     checkCloseDelayMillis = millis();
   }
+
+  if (millis() - checkCurtainsTimer > 60000) {
+    checkCurtains(); //see if curtain needs to be opened or closed
+    checkCurtainsTimer = millis();
+  }
   
   if ((millis() - heartbeatMillis) > 15000) {
     digitalWrite (LED_BUILTIN, LOW);
@@ -310,6 +284,17 @@ void loop() {
   handleUDP();
   
 //  if ((millis() - loopMillis) > 30) Serial.printf("Loop took %d millis\n", millis() - loopMillis);
+}
+
+void checkCurtains(){
+  unsigned long ltime = getLocalTime();
+  int localTime = hour(ltime) * 100 + minute(ltime);              
+  for (int i=0; i<MAX_DEVICES; i++){
+    if (devices[i].deviceType == DEVICE_CURTAIN){
+      if (devices[i].downTime == localTime && devices[i].downTime != 0) sendDeviceCommand2(devices[i],"set","lowerCurtain");
+      if (devices[i].upTime == localTime && devices[i].upTime != 0) sendDeviceCommand2(devices[i],"set","raiseCurtain");
+    }
+  }
 }
 
 void pushJson(){
@@ -396,6 +381,14 @@ String getJsonString() {
         json["devices"][i]["startTime"] = devices[i].startTime;      
         json["devices"][i]["stopTime"] = devices[i].stopTime;      
       }    
+      if (devices[i].deviceType == DEVICE_CURTAIN) {
+//        Serial.printf("DEVICE CURTAIN: %d %d %d %d %s\n",devices[i].upTime,devices[i].downTime,devices[i].currentPosition,devices[i].rotationCount,devices[i].motorReverse?"1":"0");
+        json["devices"][i]["upTime"] = devices[i].upTime;      
+        json["devices"][i]["downTime"] = devices[i].downTime;      
+        json["devices"][i]["motorReverse"] = devices[i].motorReverse?"1":"0";        
+        json["devices"][i]["currentPosition"] = devices[i].currentPosition;      
+        json["devices"][i]["rotationCount"] = devices[i].rotationCount;      
+      }     
     }
   }
   serializeJsonPretty(json,st);
@@ -525,6 +518,7 @@ void startMDNS() { // Start the mDNS responder
 
 void updateDevice(String data) {  // This routine invoked by '^' from javascript 
   bool save = false;
+  Serial.print("updateDevice: ");
   Serial.println(data);
   StaticJsonDocument<JSON_BUF_SIZE/4> doc;
   deserializeJson(doc,data.c_str());
@@ -544,34 +538,16 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
   if (doc.containsKey("mac")) { //if mac included, update device
     bool newDevice;
     int deviceIndex = getDeviceIndex(doc["mac"], &newDevice);
-    devices[deviceIndex].timer = millis();
-    devices[deviceIndex].online = 1;
-    for (int j=0; j<4;j++) devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
+//    devices[deviceIndex].timer = millis();
+//    devices[deviceIndex].online = 1;
+//    Serial.print("updateDevice remote IP: ");
+//    Serial.println(server.client().remoteIP());
+//    for (int j=0; j<4;j++) devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
     for (JsonPair keyValue : doc.as<JsonObject>()) {
-      delay(0);      
+//      delay(0);      
       int val = keyValue.value();
       STRSWITCH(keyValue.key().c_str())
       {
-        STRCASE("deviceType")
-          if ((int)devices[deviceIndex].deviceType != (int)keyValue.value()) {
-            devices[deviceIndex].deviceType = keyValue.value();
-            save = true;
-            updateGui = true;
-          }
-        STRCASE("sensor0")
-          if ((int)devices[deviceIndex].sensor[0] != (int)keyValue.value()) {
-            devices[deviceIndex].sensor[0] = keyValue.value();
-            devices[deviceIndex].deviceTime = getTime();
-            save = true;
-            updateGui = true;
-         }
-        STRCASE("sensor1")
-          if ((int)devices[deviceIndex].sensor[1] != (int)keyValue.value()) {
-            devices[deviceIndex].sensor[1] = keyValue.value();
-            devices[deviceIndex].deviceTime = getTime(); 
-            save = true;
-            updateGui = true;
-          }
         STRCASE("sensorSwap")
           if ((int)devices[deviceIndex].sensorSwap != (int)keyValue.value()) {
             devices[deviceIndex].sensorSwap = keyValue.value();
@@ -581,11 +557,7 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
         STRCASE("deviceName")
           String st = keyValue.value();    
           st.toCharArray(devices[deviceIndex].deviceName, sizeof(devices[deviceIndex].deviceName));       
-          save = true;
-        STRCASE("temp")
-          devices[deviceIndex].temp = (int)keyValue.value();
-          devices[deviceIndex].deviceTime = getTime();                   
-          updateGui = true;
+          save = true;      
         STRCASE("minTemp")
           devices[deviceIndex].minTemp = (int)keyValue.value();
           save = true;
@@ -609,23 +581,47 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           save = true;        
         STRCASE("stopTime")
           devices[deviceIndex].stopTime = (int)keyValue.value();
-          save = true;/*           
-        STRCASE("switchValue") {
-          Serial.println("updateDevice switchValue");
-          if ((int)devices[deviceIndex].switchValue != (int)keyValue.value()) {
-            devices[deviceIndex].switchValue = keyValue.value();
-            devices[deviceIndex].deviceTime = getTime();
-            updateGui = true;
-          }
-        }   
-*/
-        STRCASE("switchReverse") {
+          save = true;
+        STRCASE("upTime")
+          devices[deviceIndex].upTime = (int)keyValue.value();
+          save = true;        
+        STRCASE("downTime")
+          devices[deviceIndex].downTime = (int)keyValue.value();
+          save = true;
+        STRCASE("rotationCount")
+          displayDevice(deviceIndex);
+          devices[deviceIndex].rotationCount = (int)keyValue.value();
+          String st = keyValue.value();
+          st = "rotationCount=" + st;
+          sendDeviceCommand2(devices[deviceIndex],"set",st);
+          save = true;
+        STRCASE("motorReverse") 
+          sendDeviceCommand2(devices[deviceIndex],"set","motorReverse");
+          updateGui = true;
+        STRCASE("downButton") 
+          Serial.println("DOWN Button");
+          sendDeviceCommand2(devices[deviceIndex],"set","downButton");
+          updateGui = true;
+        STRCASE("stopButton") 
+          Serial.println("STOP Button");
+          sendDeviceCommand2(devices[deviceIndex],"set","stopButton");
+          updateGui = true;
+        STRCASE("upButton") 
+          Serial.println("UP Button");
+          sendDeviceCommand2(devices[deviceIndex],"set","upButton");
+          updateGui = true;
+        STRCASE("setBottom")
+          Serial.println("setBottom"); 
+          sendDeviceCommand2(devices[deviceIndex],"set","setBottom");
+          updateGui = true;          
+        STRCASE("switchReverse") 
           devices[deviceIndex].switchReverse = !devices[deviceIndex].switchReverse;
           devices[deviceIndex].switchValue = !devices[deviceIndex].switchValue;
           devices[deviceIndex].latchValue = !devices[deviceIndex].latchValue;
           Serial.printf("switchReverse = %d\n",devices[deviceIndex].switchReverse?1:0);
           updateGui = true;
-        }
+        
+     
       }
     }
   }
@@ -642,8 +638,6 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
 //    Serial.println(getJsonString());
     server.send(200, "application/json", getJsonString()); 
   });                                     // go to 'handleFileUpload'
-  
-  //server.on("/set", handleSet);  // GET request "set"
   
   server.on("/var.json", HTTP_POST, []() {
  //   Serial.println("\nPost!!");
@@ -667,8 +661,11 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
     devices[deviceIndex].timer = millis();
 //    Serial.println("Online set to 1");
     devices[deviceIndex].online = 1;
+//    if (devices[deviceIndex].ip[0] == 0) save = true;
     for (int j=0; j<4;j++)
       devices[deviceIndex].ip[j] = server.client().remoteIP()[j];      // **** LOGAN - what's this for????
+    IPAddress ip = devices[deviceIndex].ip;    
+//    Serial.printf("server.on/var.json DeviceIndex[%d] IP:%s\n",deviceIndex,ip.toString().c_str());
 //    Serial.println("Json");
     for (JsonPair keyValue : doc.as<JsonObject>()) {
       delay(0);
@@ -702,12 +699,12 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
           Serial.println("sensorSwap 0");           
           updateGui = true;
         }  
-        STRCASE("temp") {
+        STRCASE("temp") 
           devices[deviceIndex].temp = (int)keyValue.value();
           devices[deviceIndex].deviceTime = getTime();
           updateGui = true;
-        }
-        STRCASE("switchValue") {
+        
+        STRCASE("switchValue") 
           bool switchVal = (bool)keyValue.value();
           if (devices[deviceIndex].switchReverse) switchVal = !switchVal;          
 //          Serial.printf("switchVal %d, switchReverse %d\n", switchVal?1:0, devices[deviceIndex].switchReverse?1:0);
@@ -720,8 +717,8 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
           }
           save = true;
           updateGui = true;
-        }
-        STRCASE("pirValue") {
+        
+        STRCASE("pirValue") 
           devices[deviceIndex].pirValue = (int)keyValue.value();
           if (devices[deviceIndex].pirValue) {
             devices[deviceIndex].deviceTime = getTime();
@@ -738,12 +735,23 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
                   devices[deviceIndex].stopTime >= localTime)) devices[deviceIndex].sendAlarm = true;                  
             }
           }
-          updateGui = true;
-        }     
-        STRCASE("alarmState") {
+          updateGui = true;        
+        STRCASE("currentPosition")
+          if (devices[deviceIndex].currentPosition != (int)keyValue.value()){
+            devices[deviceIndex].currentPosition = (int)keyValue.value();
+            devices[deviceIndex].deviceTime = getTime();
+            updateGui = true;
+            displayDevice(deviceIndex);
+          }                 
+        STRCASE("rotationCount")
+            devices[deviceIndex].rotationCount = (int)keyValue.value();
+            updateGui = true;           
+        STRCASE("motorReverse")
+            devices[deviceIndex].motorReverse = (int)keyValue.value();
+        STRCASE("alarmState") 
           devices[deviceIndex].alarmState = (int)keyValue.value();
           updateGui = true;
-        }      
+        
       }     
     }
     if (save) saveSettings();
@@ -910,6 +918,18 @@ void displayDevice (int deviceIndex) {
     Serial.print ("celcius: ");
     Serial.println (devices[deviceIndex].celcius);   
   }
+  if (devices[deviceIndex].deviceType == DEVICE_CURTAIN){
+    Serial.print ("upTime: ");
+    Serial.println (devices[deviceIndex].upTime);    
+    Serial.print ("downTime: ");
+    Serial.println (devices[deviceIndex].downTime); 
+    Serial.print ("rotationCount: ");
+    Serial.println (devices[deviceIndex].rotationCount);  
+    Serial.print ("currentPosition: ");
+    Serial.println (devices[deviceIndex].currentPosition);   
+    Serial.print ("motorReverse: ");
+    if (devices[deviceIndex].motorReverse != 0) Serial.println ("1"); else Serial.println ("0"); 
+  }
   Serial.println("****************************");
 }
 
@@ -1042,11 +1062,19 @@ void pressDoorButton(Device device){
 }
 
 void sendDeviceCommand(Device device, String cmd){
-  Serial.printf ("Sending Device Command: %s\n",cmd.c_str());
   IPAddress IP = device.ip;
+  Serial.printf ("Sending Device Command: %s to %s\n",cmd.c_str(), IP.toString().c_str());
   HTTPClient http;
   http.begin("http://"+IP.toString()+"/" + cmd);
   http.POST(ACTION_MESSAGE);    //Action message to device  
+}
+
+void sendDeviceCommand2(Device device, String cmd, String param){
+  IPAddress IP = device.ip;
+  Serial.printf ("Sending Device Command: %s %s to %s\n",cmd.c_str(),param.c_str(), IP.toString().c_str());
+  HTTPClient http;
+  http.begin("http://"+IP.toString()+"/set");
+  http.POST(param);  
 }
 
 // When a webSocketEvent message is from javascript
