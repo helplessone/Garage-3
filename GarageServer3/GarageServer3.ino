@@ -77,6 +77,9 @@ byte closeState[MAX_DEVICES];
 unsigned long delayCloseTimer[MAX_DEVICES];
 unsigned long timeCloseTimer[MAX_DEVICES];
 unsigned long closeTimer[MAX_DEVICES];
+  
+bool alarm;
+//bool warning;
 
 const char* mdnsName = "swoop"; // Domain name for the mDNS responder
 
@@ -100,9 +103,38 @@ unsigned long testMillis = millis();
 int hue = 0;
 
 /*__________________________________________________________SETUP__________________________________________________________*/
+void show(const char * tag, int l) {
+    Serial.print(tag); Serial.print("\t"); Serial.println(l);
+}
 
 void setup() {
   Serial.begin(115200);        // Start the Serial communication to send messages to the computer
+
+  show("              bool",sizeof(bool));
+  show("           boolean",sizeof(boolean));
+  show("              byte",sizeof(byte));
+  show("              char",sizeof(char));
+  show("     unsigned char",sizeof(unsigned char));
+  show("           uint8_t",sizeof(uint8_t));
+  
+  show("             short",sizeof(short));
+  show("          uint16_t",sizeof(uint16_t));
+  show("              word",sizeof(word));
+
+  show("               int",sizeof(int));
+  show("      unsigned int",sizeof(unsigned int));
+  show("            size_t",sizeof(size_t));
+  
+  show("             float",sizeof(float));
+  show("              long",sizeof(long));
+  show("     unsigned long",sizeof(unsigned long));
+  show("          uint32_t",sizeof(uint32_t));
+
+  show("            double",sizeof(double));
+  
+  show("         long long",sizeof(long long));
+  show("unsigned long long",sizeof(unsigned long long));
+  show("          uint64_t",sizeof(uint64_t));  
   
   for (int i=0; i<MAX_DEVICES; i++) {  //set auto close state machines to state 0
 //    closeDelayState[i] = 0;
@@ -147,13 +179,14 @@ void setup() {
   setenv("TZ", "UTC+0UTC,M3.2.0/2,M11.1.0/2", 1);
   tzset(); // save the TZ variable
   updateGui = true;
+  alarm = false;
+//  warning = false;
 }
 
 /*__________________________________________________________LOOP__________________________________________________________*/
 
 void loop() {
  
-  bool alarm = false;
 
   if (updateGui) {    
     pushJson();
@@ -182,11 +215,12 @@ void loop() {
   }
     
   for (int i=0; i<MAX_DEVICES; i++) {  //Determine if LASER need to be turned on
+//    if (!devices[i].online) warning = true;
     if (devices[i].deviceType == DEVICE_GARAGE) {
       if (devices[i].sensorSwap == 0) {
-        if (devices[i].sensor[0] != 1 || devices[i].sensor[1] != 0 || devices[i].online == 0) alarm = true;
+        if (devices[i].sensor[0] != 1 || devices[i].sensor[1] != 0) alarm = true;
       } else {
-        if (devices[i].sensor[0] != 0 || devices[i].sensor[1] != 1 || devices[i].online == 0) alarm = true;        
+        if (devices[i].sensor[0] != 0 || devices[i].sensor[1] != 1) alarm = true;        
       }
     }
     if (devices[i].deviceType == DEVICE_LATCH) {
@@ -201,10 +235,38 @@ void loop() {
         if (devices[i].minTemp != 0 && devices[i].temp < (int)(round(float(devices[i].minTemp-32) * 5 / 9 * 100))) alarm = true;        
       }
     }  
-  } 
+    if (devices[i].deviceType == DEVICE_CURTAIN) {
+      if (devices[i].currentPosition > 900) alarm = true;  //currentPosition set to 1000 to signify stalled motor
+    }  
+  }
 
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
+
+  processGarageDoors();  
+
+  if (millis() - checkCurtainsTimer > 60000) { //check curtain every 60 seconds
+    checkCurtains(); //see if curtain needs to be opened or closed
+    checkCurtainsTimer = millis();
+  }
   
+  if ((millis() - heartbeatMillis) > 15000) {  //heartbeat blink
+    digitalWrite (LED_BUILTIN, LOW);
+//    if (warning && !alarm) digitalWrite(LASER, LOW); //if warning & not alarm, turn on laser
+    if ((millis() - heartbeatMillis) > 15000+50) {
+      digitalWrite (LED_BUILTIN, HIGH);
+//      if (!alarm) digitalWrite (LASER,HIGH); //turn laser off unless alarm is on
+//      warning = false;
+      heartbeatMillis = millis();  
+    }
+  }
+  
+  ArduinoOTA.handle();                        // listen for OTA events
+  handleUDP();
+  
+}
+
+
+void processGarageDoors(){
   if ((millis() - checkCloseDelayMillis) > 2000) {
     for (int i=0; i<MAX_DEVICES; i++) {
       if (devices[i].deviceType == DEVICE_GARAGE) {
@@ -265,25 +327,7 @@ void loop() {
       }
     }
     checkCloseDelayMillis = millis();
-  }
-
-  if (millis() - checkCurtainsTimer > 60000) {
-    checkCurtains(); //see if curtain needs to be opened or closed
-    checkCurtainsTimer = millis();
-  }
-  
-  if ((millis() - heartbeatMillis) > 15000) {
-    digitalWrite (LED_BUILTIN, LOW);
-    if ((millis() - heartbeatMillis) > 15000+50) {
-      digitalWrite (LED_BUILTIN, HIGH);
-      heartbeatMillis = millis();  
-    }
-  }
-  
-  ArduinoOTA.handle();                        // listen for OTA events
-  handleUDP();
-  
-//  if ((millis() - loopMillis) > 30) Serial.printf("Loop took %d millis\n", millis() - loopMillis);
+  }  
 }
 
 void checkCurtains(){
@@ -545,13 +589,27 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
 //    for (int j=0; j<4;j++) devices[deviceIndex].ip[j] = server.client().remoteIP()[j];
     for (JsonPair keyValue : doc.as<JsonObject>()) {
 //      delay(0);      
-      int val = keyValue.value();
+//      int val = keyValue.value();
+
+/*
+     
+      if (keyValue.key() == "sensorSwap") {
+        if ((int)devices[deviceIndex].sensorSwap != (int)keyValue.value()) {
+          devices[deviceIndex].sensorSwap = keyValue.value();
+          Serial.println("sensorSwap 0");           
+          updateGui = true;
+        }         
+        continue;
+      }
+*/      
+      
       STRSWITCH(keyValue.key().c_str())
       {
         STRCASE("sensorSwap")
           if ((int)devices[deviceIndex].sensorSwap != (int)keyValue.value()) {
             devices[deviceIndex].sensorSwap = keyValue.value();
-            Serial.println("sensorSwap 0");           
+            Serial.println("sensorSwap 0");
+            save = true;           
             updateGui = true;
           }      
         STRCASE("deviceName")
@@ -598,6 +656,7 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
         STRCASE("motorReverse") 
           sendDeviceCommand2(devices[deviceIndex],"set","motorReverse");
           updateGui = true;
+          save = true;
         STRCASE("downButton") 
           Serial.println("DOWN Button");
           sendDeviceCommand2(devices[deviceIndex],"set","downButton");
@@ -620,8 +679,7 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           devices[deviceIndex].latchValue = !devices[deviceIndex].latchValue;
           Serial.printf("switchReverse = %d\n",devices[deviceIndex].switchReverse?1:0);
           updateGui = true;
-        
-     
+          save = true;     
       }
     }
   }
@@ -1106,6 +1164,12 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
               Serial.printf ("Latch %d cleared\n",index);
               updateGui = true;
             }
+/*            
+            if (devices[index].deviceType == DEVICE_CURTAIN) {
+              devices[index].currentPosition = 50;    //make the button display yellow
+              updateGui = true;
+            }          
+*/            
           }
         }
         break;

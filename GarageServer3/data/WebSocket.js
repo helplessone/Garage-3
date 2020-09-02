@@ -946,12 +946,15 @@ function getDeviceColor(device){
 	if (device.deviceType == DEVICE_CURTAIN) {
 		if (device.online) {
 			if (device.currentPosition <= 0) return GREEN; //Curtain is up
-			else if (device.currentPosition >= device.rotationCount) return RED;
+			else if (device.currentPosition > 900) return RED;
+			else if (device.currentPosition >= device.rotationCount) return BLUE;
 			else return YELLOW;
 		} else {
 			if (device.currentPosition <= 0) return OFFLINE_GREEN; //Curtain is up
-			else if (device.currentPosition >= device.rotationCount) return OFFLINE_RED;
-			else return OFFLINE_YELLOW;		}
+			else if (device.currentPosition > 900) return OFFLINE_RED;
+			else if (device.currentPosition >= device.rotationCount) return OFFLINE_BLUE;
+			else return OFFLINE_YELLOW;		
+		}
 	}
 }
 
