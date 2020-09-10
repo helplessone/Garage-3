@@ -219,6 +219,7 @@ function setBottom(button){
 
 function addDoorTextBox (device, container) {
 	var br = document.createElement("br");
+	console.log(device);
 
 	if (device.deviceType == DEVICE_GARAGE) {
 		var closeDelay = document.createElement('input'); // closeDelay to automatically close
@@ -943,7 +944,42 @@ function getDeviceColor(device){
 			return OFFLINE_GREEN;
 		}
 	}
+
+	if (device.deviceType == DEVICE_THERMOMETER) {
+		var t;
+
+		if (device.celcius == true) t = Math.round(device.temp / 100); else t = (Math.round((device.temp / 100) * 9/5) + 32);
+
+		if (device.online) {
+			if ((t > device.maxTemp) && (device.maxTemp != 0)) return RED;
+			else if ((t < device.minTemp) && (device.minTemp != 0)) return RED;
+			else return GREEN;
+		} else {
+			if ((t > device.maxTemp) && (device.maxTemp != 0)) return OFFLINE_RED;
+			else if ((t < device.minTemp) && (device.minTemp != 0)) return OFFLINE_RED;
+			else return OFFLINE_GREEN;			
+		}
+	}
+
 	if (device.deviceType == DEVICE_CURTAIN) {
+		if (device.online) {
+			switch ( device.deviceColor) {
+				case 0: return GRAY;
+				case 1: return GREEN;
+				case 2: return RED;
+				case 3: return YELLOW;
+				case 4: return BLUE;
+			}
+		} else {
+			switch ( device.deviceColor) {
+				case 0: return OFFLINE_GRAY;
+				case 1: return OFFLINE_GREEN;
+				case 2: return OFFLINE_RED;
+				case 3: return OFFLINE_YELLOW;
+				case 4: return OFFLINE_BLUE;
+			}			
+		}
+/*		
 		if (device.online) {
 			if (device.currentPosition <= 0) return GREEN; //Curtain is up
 			else if (device.currentPosition > 900) return RED;
@@ -955,6 +991,7 @@ function getDeviceColor(device){
 			else if (device.currentPosition >= device.rotationCount) return OFFLINE_BLUE;
 			else return OFFLINE_YELLOW;		
 		}
+*/		
 	}
 }
 
@@ -1016,6 +1053,14 @@ function get(url) {
   }
 */
 
+function getErrorString(code) {
+	switch (code) {
+		case 100: return "Up switch not hit";
+		case 101: return "Motor stalled";
+		default: return "Unknown error code";
+	}
+}
+
 function processJson(jsonString){
 
     if (jsonString !== "null") {
@@ -1045,15 +1090,8 @@ function processJson(jsonString){
 					button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
 				}
 				if (json.devices[i].deviceType == DEVICE_THERMOMETER) {
-					var t;
 
-					if (json.devices[i].celcius == true) t = Math.round(json.devices[i].temp / 100); else t = (Math.round((json.devices[i].temp / 100) * 9/5) + 32);
-					
-					if ((t > json.devices[i].maxTemp) && (json.devices[i].maxTemp != 0)) button.style.backgroundColor = RED;
-					else if ((t < json.devices[i].minTemp) && (json.devices[i].minTemp != 0)) button.style.backgroundColor = BLUE;
-					else if (json.devices[i].online == 0) button.style.backgroundColor = YELLOW;
-					else button.style.backgroundColor = GREEN;
-
+					button.style.backgroundColor = getDeviceColor(json.devices[i]);
 
 					var st = "Last Read ";
 					var deviceTime = timeString(json.devices[i].deviceTime);
@@ -1089,12 +1127,16 @@ function processJson(jsonString){
 				if (json.devices[i].deviceType == DEVICE_CURTAIN) {	
 					button.style.backgroundColor = getDeviceColor(json.devices[i]);	
 					var deviceTime = timeString(json.devices[i].deviceTime);
-					if (json.devices[i].currentPosition <= 0) {
-						var st = "Raised @ " + deviceTime;
+					if (json.devices[i].errorCode != 0) {
+						st = "Error: " + getErrorString(json.devices[i].errorCode);
 					} else {
-						var st = "Lowered @ " + deviceTime;
+						if (json.devices[i].currentPosition <= 0) {
+							var st = "Raised @ " + deviceTime;
+						} else {
+							var st = "Lowered @ " + deviceTime;
+						}
 					}
-					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + "</p>";
+					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " (" + json.devices[i].currentPosition + ")" + "</p>";
 					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + st + "</p>";
 				}			
 			}

@@ -40,6 +40,8 @@ ESP8266WebServer server(80);
   #define D0 16
 #endif
 
+#define HEARTBEAT 10000
+
 Device device;
 
 #if SENSOR_TYPE == DEVICE_THERMOMETER
@@ -87,13 +89,13 @@ Device device;
   #define REVERSE 12    // (D6) Output - Reverses motor direction
   #define UP 1          //currentDirection UP
   #define DOWN 0        //currentDirection DOWN
-  #define STALLTIME 1500    
+  #define STALLTIME 2500    
   int irValue;
   int currentDirection = 0; //UP or DOWN
   bool motorRunning;
   bool manualOverride = false;
   long int stallTimer;
-  bool motorFault = false;
+  word stallCounter;
 #endif
 
 #define LED D0
@@ -149,8 +151,15 @@ void setup() {
   delay(50);
   pinMode(REVERSE, OUTPUT);
   motorOff();
-  motorFault = false;
   irValue = digitalRead(IR);
+  if (device.currentPosition < 0) { 
+    device.currentPosition = 0; //reset currentPosition
+    saveDevice();
+  }
+  if (device.errorCode != 0) { 
+    device.errorCode = 0; //clear error
+    saveDevice();
+  }
 #endif
 
   macID = WiFi.macAddress();
@@ -191,7 +200,7 @@ void loop() {
 void handleStatusUpdate() {
   String st;
 #if SENSOR_TYPE == DEVICE_GARAGE 
-  if (!(startup || (millis() - heartbeat > 10000) || 
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || 
                    (doorDown != digitalRead(DOORDOWN)) || 
                    (doorUp != digitalRead(DOORUP)))  ) return;
 #endif
@@ -199,29 +208,31 @@ void handleStatusUpdate() {
     sensors.requestTemperatures();
     float f = sensors.getTempCByIndex(0);
     if ((f < -120) || (f > 200)) f = currentTemp;
-    if (!(startup || forceUpdate || (millis() - heartbeat > 10000) || 
+    if (!(startup || forceUpdate || (millis() - heartbeat > HEARTBEAT) || 
           (abs(currentTemp - f) > 1.0 ))) return;
     if (abs(currentTemp - f) > 1.0 ) Serial.println("Forced temp update"); 
 //    if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
     currentTemp = f; 
 #endif
 #if SENSOR_TYPE == DEVICE_LATCH 
-  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate ||
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate ||
                    (switchValue != digitalRead(SWITCH)))) return;
   switchValue = digitalRead(SWITCH);                   
 #endif
 #if SENSOR_TYPE == DEVICE_BAT
   processBatAlarm(); 
-  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate)) return;
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
 #endif 
  
 #if SENSOR_TYPE == DEVICE_CURTAIN
   processCurtain(); 
-  if (motorRunning) return;
-  if (!(startup || (millis() - heartbeat > 10000) || forceUpdate)) return;
+  if (motorRunning && !forceUpdate) return;
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
 #endif
   
 #if SENSOR_TYPE == DEVICE_GARAGE  
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate ||
+      doorUp != digitalRead(DOORUP) || doorDown != digitalRead(DOORDOWN))) return;
   doorUp = digitalRead(DOORUP);
   doorDown = digitalRead(DOORDOWN);
 #endif  
@@ -246,9 +257,6 @@ void handleStatusUpdate() {
   #if SENSOR_TYPE == DEVICE_THERMOMETER  
     int temp =  (int)(currentTemp * 100);
     json["temp"] = temp;
-    Serial.print("temp = ");
-    Serial.println(temp);
-    Serial.println(sensors.getTempCByIndex(0));
   #endif
   #if SENSOR_TYPE == DEVICE_LATCH  
     json["switchValue"] = switchValue?1:0;
@@ -261,9 +269,10 @@ void handleStatusUpdate() {
     json["currentPosition"] = device.currentPosition;
     json["rotationCount"] = device.rotationCount;
     json["motorReverse"] = device.motorReverse;
+    json["errorCode"] = device.errorCode;
+    json["deviceColor"] = device.deviceColor;
   #endif   
   serializeJsonPretty(json,st);
-//  Serial.println(st);
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
@@ -281,8 +290,11 @@ void handleStatusUpdate() {
 
 #if SENSOR_TYPE == DEVICE_CURTAIN
 void motorOn(){
-  Serial.printf("Motor ON: Direction = %d, Reverse = %d\n",currentDirection, device.motorReverse);
-  if (motorFault) return;
+  if (device.errorCode != 0) {
+    Serial.printf("Error code: %d\n",device.errorCode);
+    return;
+  }
+  Serial.printf("Motor ON: Direction = %s, Reverse = %d, Position = %d\n",(currentDirection==UP)?"UP":"DOWN", device.motorReverse, device.currentPosition);
   if (device.motorReverse == 0) {
     if (currentDirection == DOWN) {
       digitalWrite(REVERSE,LOW); 
@@ -297,70 +309,93 @@ void motorOn(){
     }   
   }
   delay(50);
-  digitalWrite(MOTOR,HIGH);
+  device.deviceColor = YELLOW;
+  forceUpdate = true;
   motorRunning = true;
+  stallCounter = device.currentPosition;
+  digitalWrite(MOTOR,HIGH);
   stallTimer = millis();
 }
 
 void motorOff() {
-  Serial.println("Motor OFF");
+  Serial.printf("Motor OFF: Direction = %s, Reverse = %d, Position = %d\n",(currentDirection==UP)?"UP":"DOWN", device.motorReverse, device.currentPosition);
   digitalWrite(MOTOR,LOW);
   delay(50);
   digitalWrite(REVERSE,LOW);
   motorRunning = false;
+  if (device.currentPosition >= device.rotationCount) device.deviceColor = BLUE;
+  else if (device.currentPosition <= 0) device.deviceColor = GREEN;
+  else device.deviceColor = YELLOW;
   forceUpdate = true;
+}
+
+void lowerCurtain(){
+  if (device.currentPosition <= 4) { //if up (or just slightln down), put it down
+    currentDirection = DOWN; 
+    motorOn(); 
+  }  
+}
+
+void raiseCurtain(){
+  if (device.currentPosition > 0) {
+    currentDirection = UP;
+    motorOn();     
+  }   
 }
 
 void processCurtain(){
   int cnt = 0;  
-  if (motorFault) return;
-   
+  if (device.errorCode != 0) return;
+
+
   if (motorRunning && millis() - stallTimer > STALLTIME) {
-    motorOff();
-    motorFault = true;
-    delay(50);
-    device.currentPosition = 1000;
-    forceUpdate = true;
-    return; 
-  }  
- 
+    if (device.currentPosition == stallCounter) {
+      motorOff();
+      delay(50);
+      device.deviceColor = RED;
+      device.errorCode = CURTAIN_STALL_ERROR;   
+      forceUpdate = true;
+      return;
+    }
+    stallCounter = device.currentPosition;
+    stallTimer = millis();
+  } 
+
   if (currentDirection == UP && digitalRead(SWITCH) == 0) {
-    motorOff();
     device.currentPosition = 0;
+    motorOff();
     manualOverride = false;
+    saveDevice();
     return;
   }
   if (irValue != digitalRead(IR)) {
     for (int i=0; i<30; i++) {
       if (irValue != digitalRead(IR)) cnt++;
-      delay(1);
+      delay(0);
     }
-    if (cnt > 25) {
-      stallTimer = millis();
+    if (cnt > 20) {
       irValue = digitalRead(IR);
       if (irValue == 1) {
         if (currentDirection == DOWN) {
           device.currentPosition++;
-//          if (device.currentPosition % 16 == 0) forceUpdate = true; //update server every gear turn
           if (device.currentPosition >= device.rotationCount && !manualOverride) {
             motorOff(); 
             forceUpdate = true;
           }
           saveDevice();
         } else {
-          device.currentPosition--;
-//          if (device.currentPosition % 16 == 0) forceUpdate = true; //update server every gear turn
+          device.currentPosition--; 
           if (!manualOverride) {
-            if (device.currentPosition <= -16) { // This shouldn't happen, switch should cut it off
+            if (device.currentPosition <= -24) { // This shouldn't happen, switch should cut it off
               Serial.println("Error, switch not hit");
               motorOff(); 
-              device.currentPosition = 0;
+              device.errorCode = CURTAIN_SWITCH_ERROR;
+              device.deviceColor = RED;
               forceUpdate = true;
             }
           }
           saveDevice();          
         }
-//        Serial.printf("  Position = %d\n",device.currentPosition);
       }
     }
   }
@@ -576,12 +611,10 @@ void startServer() {
           if (device.currentPosition <= 0) { //if up, put it down
             currentDirection = DOWN; 
             motorOn();
-            Serial.printf("<=0 Direction: %d, Position: %d, Running: %d\n",currentDirection,device.currentPosition, motorRunning);
           } 
           if (device.currentPosition > 0) {
             currentDirection = UP;
             motorOn();
-            Serial.printf(">0 Direction: %d, Position: %d, Running: %d\n",currentDirection,device.currentPosition, motorRunning);
           }
         }
 #endif       
@@ -625,6 +658,7 @@ void startServer() {
         Value = getArgValue(server.arg(i));
         Serial.printf("Name = |%s|, Value = |%s|\n",Name.c_str(),Value.c_str());
 
+#if SENSOR_TYPE == DEVICE_CURTAIN
         if (Name.equals("rotationCount")) device.rotationCount = Value.toInt();
         if (Name.equals("motorReverse")) {
           device.motorReverse = !device.motorReverse;
@@ -636,21 +670,22 @@ void startServer() {
         if (Name.equals("downButton")) {
           manualOverride = true;
           currentDirection = DOWN;
+          device.errorCode = 0;
           motorOn();          
         }
         if (Name.equals("upButton")) {
           manualOverride = true;
           currentDirection = UP;
+          device.errorCode = 0;
           motorOn();          
         }
         if (Name.equals("stopButton")) motorOff();
         if (Name.equals("setBottom")) {
           device.rotationCount = device.currentPosition;
           saveDevice();
-        }
-        
-
+        }      
         Serial.printf("rotationCount = %d\n",device.rotationCount);        
+#endif        
       }
     }
     server.send(HTTP_CODE_OK);
@@ -658,20 +693,6 @@ void startServer() {
   });
   
   server.begin();
-}
-
-void lowerCurtain(){
-  if (device.currentPosition <= 4) { //if up (or just slightln down), put it down
-    currentDirection = DOWN; 
-    motorOn(); 
-  }  
-}
-
-void raiseCurtain(){
-  if (device.currentPosition > 0) {
-    currentDirection = UP;
-    motorOn();     
-  }   
 }
 
 String getArgName (String st) {
