@@ -1,3 +1,5 @@
+#include <LiquidCrystal.h>
+
 //#define SENSOR_TYPE DEVICE_GARAGE
 //#define SENSOR_TYPE DEVICE_THERMOMETER
 //#define SENSOR_TYPE DEVICE_LATCH
@@ -92,8 +94,10 @@ Device device;
   #define STALLTIME 2500    
   int irValue;
   int currentDirection = 0; //UP or DOWN
+  int currentPosition;
   bool motorRunning;
   bool manualOverride = false;
+  unsigned long interruptTimer;
   long int stallTimer;
   word stallCounter;
 #endif
@@ -145,6 +149,7 @@ void setup() {
 
 #if SENSOR_TYPE == DEVICE_CURTAIN
   pinMode(IR, INPUT);
+  attachInterrupt(digitalPinToInterrupt(IR), interrupt, RISING);
   pinMode(SWITCH,INPUT_PULLUP);
   pinMode(MOTOR, OUTPUT);
   digitalWrite(MOTOR,LOW);
@@ -160,6 +165,8 @@ void setup() {
     device.errorCode = 0; //clear error
     saveDevice();
   }
+  currentPosition = device.currentPosition;
+  interruptTimer = millis();
 #endif
 
   macID = WiFi.macAddress();
@@ -289,6 +296,14 @@ void handleStatusUpdate() {
 }
 
 #if SENSOR_TYPE == DEVICE_CURTAIN
+
+ICACHE_RAM_ATTR void interrupt() {
+  if (millis() - interruptTimer < 100) return;
+  if (currentDirection == DOWN) device.currentPosition++; else device.currentPosition--;  
+  Serial.printf("count: %d\n",device.currentPosition);
+  interruptTimer = millis();
+}
+
 void motorOn(){
   if (device.errorCode != 0) {
     Serial.printf("Error code: %d\n",device.errorCode);
@@ -346,8 +361,7 @@ void raiseCurtain(){
 void processCurtain(){
   int cnt = 0;  
   if (device.errorCode != 0) return;
-
-
+  
   if (motorRunning && millis() - stallTimer > STALLTIME) {
     if (device.currentPosition == stallCounter) {
       motorOff();
@@ -368,6 +382,33 @@ void processCurtain(){
     saveDevice();
     return;
   }
+
+
+/************************/
+  if (currentPosition != device.currentPosition) {
+    currentPosition = device.currentPosition;
+    if (currentDirection == DOWN) {
+      if (device.currentPosition >= device.rotationCount && !manualOverride) {
+        motorOff(); 
+        forceUpdate = true;
+      }
+      saveDevice();
+    } else {
+      if (!manualOverride) {
+        if (device.currentPosition <= -24) { // This shouldn't happen, switch should cut it off
+          Serial.println("Error, switch not hit");
+          motorOff(); 
+          device.errorCode = CURTAIN_SWITCH_ERROR;
+          device.deviceColor = RED;
+          forceUpdate = true;
+        }
+      }
+      saveDevice();          
+    }
+  }
+/************************/
+
+/*  
   if (irValue != digitalRead(IR)) {
     for (int i=0; i<30; i++) {
       if (irValue != digitalRead(IR)) cnt++;
@@ -396,9 +437,11 @@ void processCurtain(){
           }
           saveDevice();          
         }
+        Serial.printf("count: %d\n",device.currentPosition);
       }
     }
   }
+*/  
 }
 #endif
 
