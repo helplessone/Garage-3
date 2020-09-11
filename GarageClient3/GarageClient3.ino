@@ -91,15 +91,18 @@ Device device;
   #define REVERSE 12    // (D6) Output - Reverses motor direction
   #define UP 1          //currentDirection UP
   #define DOWN 0        //currentDirection DOWN
-  #define STALLTIME 2500    
+  #define STALLTIME 1500    
   int irValue;
   int currentDirection = 0; //UP or DOWN
   int currentPosition;
   bool motorRunning;
   bool manualOverride = false;
   unsigned long interruptTimer;
+  int interruptCounter;
   long int stallTimer;
   word stallCounter;
+
+  int test = 0;
 #endif
 
 #define LED D0
@@ -119,7 +122,8 @@ void setup() {
   digitalWrite(LED,HIGH);
   SPIFFS.begin();              // Start the SPI Flash File System (SPIFFS)
   
-  restoreDevice();  
+  restoreDevice(); 
+  deleteLog(); 
   
 #if SENSOR_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
@@ -298,10 +302,24 @@ void handleStatusUpdate() {
 #if SENSOR_TYPE == DEVICE_CURTAIN
 
 ICACHE_RAM_ATTR void interrupt() {
+  if (millis() - interruptTimer < 50) return;
+  if (currentDirection == DOWN) interruptCounter++; else interruptCounter--;
+  interruptTimer = millis();
+  return;
+/*  
+  if (currentDirection == UP && digitalRead(SWITCH) == 0) {
+    motorOff();
+    device.currentPosition = 0;
+    manualOverride = false;
+    saveDevice();
+  }  
+*/  
+
   if (millis() - interruptTimer < 100) return;
   if (currentDirection == DOWN) device.currentPosition++; else device.currentPosition--;  
   Serial.printf("count: %d\n",device.currentPosition);
   interruptTimer = millis();
+  
 }
 
 void motorOn(){
@@ -328,6 +346,7 @@ void motorOn(){
   forceUpdate = true;
   motorRunning = true;
   stallCounter = device.currentPosition;
+  interruptCounter = device.currentPosition;
   digitalWrite(MOTOR,HIGH);
   stallTimer = millis();
 }
@@ -361,54 +380,55 @@ void raiseCurtain(){
 void processCurtain(){
   int cnt = 0;  
   if (device.errorCode != 0) return;
-  
+ 
   if (motorRunning && millis() - stallTimer > STALLTIME) {
-    if (device.currentPosition == stallCounter) {
+    Serial.printf("[STALL]interrupt: %d currentPosition: %d\n",interruptCounter, device.currentPosition);    
+    if (interruptCounter == device.currentPosition) {
       motorOff();
+      saveDevice();
       delay(50);
       device.deviceColor = RED;
       device.errorCode = CURTAIN_STALL_ERROR;   
       forceUpdate = true;
       return;
     }
-    stallCounter = device.currentPosition;
-    stallTimer = millis();
   } 
 
   if (currentDirection == UP && digitalRead(SWITCH) == 0) {
-    device.currentPosition = 0;
     motorOff();
+    device.currentPosition = 0;
+    interruptCounter = 0;
     manualOverride = false;
     saveDevice();
     return;
   }
 
-
-/************************/
-  if (currentPosition != device.currentPosition) {
-    currentPosition = device.currentPosition;
+  if (interruptCounter != device.currentPosition) {
+    device.currentPosition = interruptCounter;
+    stallTimer = millis();
     if (currentDirection == DOWN) {
       if (device.currentPosition >= device.rotationCount && !manualOverride) {
-        motorOff(); 
+        motorOff();
+        saveDevice();
+        device.deviceColor = BLUE; 
         forceUpdate = true;
       }
-      saveDevice();
     } else {
       if (!manualOverride) {
-        if (device.currentPosition <= -24) { // This shouldn't happen, switch should cut it off
+        if (device.currentPosition <= -12) { // This shouldn't happen, switch should cut it off
           Serial.println("Error, switch not hit");
           motorOff(); 
+          saveDevice();
           device.errorCode = CURTAIN_SWITCH_ERROR;
           device.deviceColor = RED;
           forceUpdate = true;
         }
       }
-      saveDevice();          
     }
+    Serial.printf("count: %d\n",device.currentPosition);    
   }
-/************************/
 
-/*  
+/**
   if (irValue != digitalRead(IR)) {
     for (int i=0; i<30; i++) {
       if (irValue != digitalRead(IR)) cnt++;
@@ -437,7 +457,7 @@ void processCurtain(){
           }
           saveDevice();          
         }
-        Serial.printf("count: %d\n",device.currentPosition);
+        Serial.printf("count: %d test: %d\n",device.currentPosition, test);
       }
     }
   }
@@ -702,9 +722,16 @@ void startServer() {
         Serial.printf("Name = |%s|, Value = |%s|\n",Name.c_str(),Value.c_str());
 
 #if SENSOR_TYPE == DEVICE_CURTAIN
-        if (Name.equals("rotationCount")) device.rotationCount = Value.toInt();
+        if (Name.equals("rotationCount")) {
+          device.rotationCount = Value.toInt();
+          String s = "rotationCount = " + String(device.rotationCount) + "\n";
+          logString(s);
+          saveDevice();
+          forceUpdate = true;
+        }
         if (Name.equals("motorReverse")) {
           device.motorReverse = !device.motorReverse;
+          saveDevice();
           forceUpdate = true;
         }
         if (Name.equals("lowerCurtain")) lowerCurtain();
@@ -726,8 +753,9 @@ void startServer() {
         if (Name.equals("setBottom")) {
           device.rotationCount = device.currentPosition;
           saveDevice();
+          forceUpdate = true;
         }      
-        Serial.printf("rotationCount = %d\n",device.rotationCount);        
+//        Serial.printf("rotationCount = %d\n",device.rotationCount);        
 #endif        
       }
     }
@@ -735,7 +763,47 @@ void startServer() {
     saveDevice();
   });
   
+  server.onNotFound(handleNotFound);          // if someone requests any other file or page, go to function 'handleNotFound'
+                                              // and check if the file exists  
   server.begin();
+}
+
+void handleNotFound(){ // if the requested file or page doesn't exist, return a 404 not found error
+  if(!handleFileRead(server.uri())){          // check if the file exists in the flash memory (SPIFFS), if so, send it
+    server.send(404, "text/plain", "404: File Not Found");
+  }
+}
+
+bool handleFileRead(String path) { // send the right file to the client (if it exists)
+  Serial.println("handleFileRead: " + path);
+  if (path.endsWith("/")) {
+    path += "index.html";          // If a folder is requested, send the index file
+  }
+  String contentType = getContentType(path);             // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
+    if (SPIFFS.exists(pathWithGz))                         // If there's a compressed version available
+      path += ".gz";                                         // Use the compressed verion
+    File file = SPIFFS.open(path, "r");                    // Open the file
+    size_t sent = server.streamFile(file, contentType);    // Send it to the client
+    file.close();                                          // Close the file again
+    Serial.println(String("\tSent file: ") + path);
+    return true;
+  }
+  if (path == "/var.json") {
+    Serial.println("var.json requested");
+  }
+  Serial.println(String("\tFile Not Found: ") + path);   // If the file doesn't exist, return false
+  return false;
+}
+
+String getContentType(String filename) { // determine the filetype of a given filename, based on the extension
+  if (filename.endsWith(".html")) return "text/html";
+  else if (filename.endsWith(".css")) return "text/css";
+  else if (filename.endsWith(".js")) return "application/javascript";
+  else if (filename.endsWith(".ico")) return "image/x-icon";
+  else if (filename.endsWith(".gz")) return "application/x-gzip";
+  return "text/plain";
 }
 
 String getArgName (String st) {
@@ -769,14 +837,14 @@ void clearDevice() {
 } 
 
 void deleteSettings(){
-  SPIFFS.remove("/devices.txt");
-  Serial.println ("/devices.txt deleted");
+  SPIFFS.remove("/device.txt");
+  Serial.println ("/device.txt deleted");
   clearDevice();
   ESP.reset();
 }
 
 void saveDevice(){
-  File f = SPIFFS.open("/devices.txt","w");
+  File f = SPIFFS.open("/device.txt","w");
   if (!f) return;
   f.write((const char *)&(device),sizeof(device));
   f.close();  
@@ -785,8 +853,19 @@ void saveDevice(){
 void restoreDevice() {
   char buffer[sizeof(Device)];
   clearDevice();
-  File f = SPIFFS.open("/devices.txt","r");
+  File f = SPIFFS.open("/device.txt","r");
   if (!f) return;
   f.readBytes((char *)&(device),sizeof(device));
   f.close(); 
+}
+
+void logString(String st){
+  File f = SPIFFS.open("/log.txt","a");
+  if (!f) return;
+  f.write(st.c_str());
+  f.close(); 
+}
+
+void deleteLog(){
+  SPIFFS.remove("/log.txt");
 }

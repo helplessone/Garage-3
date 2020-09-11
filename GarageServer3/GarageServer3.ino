@@ -110,6 +110,7 @@ int hue = 0;
 
 void setup() {
   Serial.begin(115200);        // Start the Serial communication to send messages to the computer
+  deleteLog();
 /*
   show("              bool",sizeof(bool));
   show("           boolean",sizeof(boolean));
@@ -1295,4 +1296,15 @@ String getContentType(String filename) { // determine the filetype of a given fi
   else if (filename.endsWith(".ico")) return "image/x-icon";
   else if (filename.endsWith(".gz")) return "application/x-gzip";
   return "text/plain";
+}
+
+void logString(String st){
+  File f = SPIFFS.open("/log.txt","a");
+  if (!f) return;
+  f.write(st.c_str());
+  f.close(); 
+}
+
+void deleteLog(){
+  SPIFFS.remove("/log.txt");
 }

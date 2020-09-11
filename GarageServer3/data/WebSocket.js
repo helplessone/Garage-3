@@ -390,6 +390,7 @@ function addDoorTextBox (device, container) {
 		rotations.maxLength = 3;
 		rotations.id = 'ROTATIONCOUNT' + device.mac;
 		rotations.value = device.rotationCount;
+		console.log("rotationCount= " + device.rotationCount);
 
 		var downbutton = document.createElement('img'); // rotation count
 		downbutton.src =  'https://api.iconify.design/emojione:fast-down-button.svg?color=%230099ff';
