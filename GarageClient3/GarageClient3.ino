@@ -1,10 +1,10 @@
 #include <LiquidCrystal.h>
 
 //#define SENSOR_TYPE DEVICE_GARAGE
-//#define SENSOR_TYPE DEVICE_THERMOMETER
+#define SENSOR_TYPE DEVICE_THERMOMETER
 //#define SENSOR_TYPE DEVICE_LATCH
 //#define SENSOR_TYPE DEVICE_BAT
-#define SENSOR_TYPE DEVICE_CURTAIN
+//#define SENSOR_TYPE DEVICE_CURTAIN
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -100,7 +100,7 @@ Device device;
   unsigned long interruptTimer;
   int interruptCounter;
   long int stallTimer;
-  word stallCounter;
+//  word stallCounter;
 
   int test = 0;
 #endif
@@ -305,21 +305,8 @@ ICACHE_RAM_ATTR void interrupt() {
   if (millis() - interruptTimer < 50) return;
   if (currentDirection == DOWN) interruptCounter++; else interruptCounter--;
   interruptTimer = millis();
-  return;
-/*  
-  if (currentDirection == UP && digitalRead(SWITCH) == 0) {
-    motorOff();
-    device.currentPosition = 0;
-    manualOverride = false;
-    saveDevice();
-  }  
-*/  
-
-  if (millis() - interruptTimer < 100) return;
-  if (currentDirection == DOWN) device.currentPosition++; else device.currentPosition--;  
-  Serial.printf("count: %d\n",device.currentPosition);
-  interruptTimer = millis();
-  
+  if (interruptCounter % 5 == 0) forceUpdate = true;
+  return; 
 }
 
 void motorOn(){
@@ -345,7 +332,7 @@ void motorOn(){
   device.deviceColor = YELLOW;
   forceUpdate = true;
   motorRunning = true;
-  stallCounter = device.currentPosition;
+//  stallCounter = device.currentPosition;
   interruptCounter = device.currentPosition;
   digitalWrite(MOTOR,HIGH);
   stallTimer = millis();
@@ -364,7 +351,7 @@ void motorOff() {
 }
 
 void lowerCurtain(){
-  if (device.currentPosition <= 4) { //if up (or just slightln down), put it down
+  if (device.currentPosition <= 4) { //if up (or just slightly down), put it down
     currentDirection = DOWN; 
     motorOn(); 
   }  
@@ -860,6 +847,7 @@ void restoreDevice() {
 }
 
 void logString(String st){
+  return;
   File f = SPIFFS.open("/log.txt","a");
   if (!f) return;
   f.write(st.c_str());

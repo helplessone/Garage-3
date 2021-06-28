@@ -439,6 +439,13 @@ String getJsonString() {
         json["devices"][i]["minTemp"] = devices[i].minTemp;        
         json["devices"][i]["celcius"] = devices[i].celcius;        
       }
+      if (devices[i].deviceType == DEVICE_THERMOSTAT) {
+        json["devices"][i]["thermostat_temp"] = devices[i].thermostat_temp;   
+        json["devices"][i]["thermostat_onTemp"] = devices[i].thermostat_onTemp; 
+        json["devices"][i]["thermostat_offTemp"] = devices[i].thermostat_offTemp;        
+        json["devices"][i]["thermostat_minTime"] = devices[i].thermostat_minTime;        
+        json["devices"][i]["thermostat_celcius"] = devices[i].thermostat_celcius;        
+      }
       if (devices[i].deviceType == DEVICE_LATCH) {
         json["devices"][i]["switchValue"] = devices[i].switchValue;
         json["devices"][i]["latchValue"] = devices[i].latchValue;           
@@ -1007,6 +1014,18 @@ void displayDevice (int deviceIndex) {
     Serial.print ("celcius: ");
     Serial.println (devices[deviceIndex].celcius);   
   }
+  if (devices[deviceIndex].deviceType == DEVICE_THERMOSTAT){
+    Serial.print ("thermostat_temp: ");
+    Serial.println (devices[deviceIndex].thermostat_temp);    
+    Serial.print ("thermostat_onTemp: ");
+    Serial.println (devices[deviceIndex].thermostat_onTemp); 
+    Serial.print ("thermostat_offTemp: ");
+    Serial.println (devices[deviceIndex].thermostat_offTemp);  
+    Serial.print ("thermostat_minTime: ");
+    Serial.println (devices[deviceIndex].thermostat_minTime);   
+    Serial.print ("thermostat_celcius: ");
+    Serial.println (devices[deviceIndex].thermostat_celcius);     
+  }  
   if (devices[deviceIndex].deviceType == DEVICE_CURTAIN){
     Serial.print ("upTime: ");
     Serial.println (devices[deviceIndex].upTime);    
