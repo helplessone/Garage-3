@@ -1,10 +1,11 @@
 #include <LiquidCrystal.h>
 
-//#define SENSOR_TYPE DEVICE_GARAGE
-#define SENSOR_TYPE DEVICE_THERMOMETER
-//#define SENSOR_TYPE DEVICE_LATCH
-//#define SENSOR_TYPE DEVICE_BAT
-//#define SENSOR_TYPE DEVICE_CURTAIN
+//#define DEVICE_TYPE DEVICE_GARAGE
+#define DEVICE_TYPE DEVICE_THERMOMETER
+//#define DEVICE_TYPE DEVICE_LATCH
+//#define DEVICE_TYPE DEVICE_BAT
+//#define DEVICE_TYPE DEVICE_CURTAIN
+//#define DEVICE_TYPE DEVICE_THERMOSTAT
 
 #define ESP8266;
 #include <IotSensors.h>
@@ -46,7 +47,7 @@ ESP8266WebServer server(80);
 
 Device device;
 
-#if SENSOR_TYPE == DEVICE_THERMOMETER
+#if DEVICE_TYPE == DEVICE_THERMOMETER
   #define deviceTypeString "THERMO"
   #include <OneWire.h>
   #include <DallasTemperature.h>
@@ -59,7 +60,22 @@ Device device;
   float currentTemp = 0.0;
 #endif
 
-#if SENSOR_TYPE == DEVICE_GARAGE
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+  #define deviceTypeString "TSTAT"
+  #include <OneWire.h>
+  #include <DallasTemperature.h>
+  // Data wire is plugged into digital pin 2 on the Arduino
+  #define ONE_WIRE_BUS 5 // (D1) thermometer input on NodeMCU
+  #define RELAY 14       // (D5) Output: HIGH=Relay Closed, LOW=Relay Open to Activate A/C unit
+  // Setup a oneWire instance to communicate with any OneWire device
+  OneWire oneWire(ONE_WIRE_BUS);
+  // Pass oneWire reference to DallasTemperature library
+  DallasTemperature sensors(&oneWire);
+  float currentTemp = 0.0;
+  unsigned long startTime = 0;
+#endif
+
+#if DEVICE_TYPE == DEVICE_GARAGE
   #define deviceTypeString "GARAGE"
   #define DOORUP 5      // (D1) Input: 0 if door is up
   #define DOORDOWN 4    // (D2) Input: 0 if door is down
@@ -67,13 +83,13 @@ Device device;
   int doorUp, doorDown;
 #endif
 
-#if SENSOR_TYPE == DEVICE_LATCH
+#if DEVICE_TYPE == DEVICE_LATCH
   #define deviceTypeString "LATCH"
   #define SWITCH 4      // (D2) Input: 0 if door is up
   bool switchValue;
 #endif
 
-#if SENSOR_TYPE == DEVICE_BAT
+#if DEVICE_TYPE == DEVICE_BAT
   #define deviceTypeString "BAT"
   #define PIR 4         // (D2) Input from PIR sensor
   #define BAT_ALARM 14  // (D5) Output: set HIGH to activate external alarm
@@ -83,7 +99,7 @@ Device device;
   byte alarmRepeat;
 #endif
 
-#if SENSOR_TYPE == DEVICE_CURTAIN
+#if DEVICE_TYPE == DEVICE_CURTAIN
   #define deviceTypeString "CURTAIN"
   #define SWITCH 5      // (D1) Input from SWITCH (curtain up)
   #define IR 4          // (D2) Input from IR sensor
@@ -125,7 +141,7 @@ void setup() {
   restoreDevice(); 
   deleteLog(); 
   
-#if SENSOR_TYPE == DEVICE_GARAGE
+#if DEVICE_TYPE == DEVICE_GARAGE
   pinMode(DOORUP, INPUT);
   pinMode(DOORDOWN, INPUT);
   pinMode(DOORBUTTON, OUTPUT);
@@ -134,16 +150,26 @@ void setup() {
   doorDown = digitalRead(DOORDOWN);
 #endif 
 
-#if SENSOR_TYPE == SENSOR_THERMOMETER
+#if DEVICE_TYPE == DEVICE_THERMOMETER
   sensors.begin();  // Start up the temperature library
 #endif
 
-#if SENSOR_TYPE == DEVICE_LATCH
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+  pinMode(RELAY, OUTPUT);
+  digitalWrite (RELAY, LOW); //Turn off relay
+  if (device.t_on == true){
+    device.t_on = false;
+    saveDevice();
+  }
+  sensors.begin();  // Start up the temperature library
+#endif
+
+#if DEVICE_TYPE == DEVICE_LATCH
   pinMode(SWITCH, INPUT);
   switchValue = digitalRead(SWITCH);
 #endif 
 
-#if SENSOR_TYPE == DEVICE_BAT
+#if DEVICE_TYPE == DEVICE_BAT
   pinMode(PIR, INPUT);
   pinMode(BAT_ALARM, OUTPUT);
   digitalWrite (BAT_ALARM, LOW);  //Turn off alarm  
@@ -151,7 +177,7 @@ void setup() {
   alarmState = 0;
 #endif 
 
-#if SENSOR_TYPE == DEVICE_CURTAIN
+#if DEVICE_TYPE == DEVICE_CURTAIN
   pinMode(IR, INPUT);
   attachInterrupt(digitalPinToInterrupt(IR), interrupt, RISING);
   pinMode(SWITCH,INPUT_PULLUP);
@@ -190,7 +216,11 @@ void setup() {
 
   startWiFi(); 
   myIP = WiFi.localIP();
-  sprintf(OTAName, "%s_%03d",deviceTypeString,myIP[3]);
+  if (strlen(device.deviceName) > 0) 
+    sprintf(OTAName, "%s",device.deviceName);
+    else sprintf(OTAName, "%s_%03d",deviceTypeString,myIP[3]);
+//  Serial.print ("***** OTAName=");
+//  Serial.println(OTAName);
   
   startOTA();                  // Start the OTA service
   displayInfo();
@@ -208,14 +238,22 @@ void loop() {
   delay(1);
 }
 
+word CtoF(word temp) {
+  return ((temp * 9 / 5) + 32);
+}
+
+word FtoC(word temp) {
+  return ((temp - 32) * 5 / 9);
+}
+
 void handleStatusUpdate() {
   String st;
-#if SENSOR_TYPE == DEVICE_GARAGE 
+#if DEVICE_TYPE == DEVICE_GARAGE 
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || 
                    (doorDown != digitalRead(DOORDOWN)) || 
                    (doorUp != digitalRead(DOORUP)))  ) return;
 #endif
-#if SENSOR_TYPE == DEVICE_THERMOMETER 
+#if DEVICE_TYPE == DEVICE_THERMOMETER 
     sensors.requestTemperatures();
     float f = sensors.getTempCByIndex(0);
     if ((f < -120) || (f > 200)) f = currentTemp;
@@ -225,23 +263,78 @@ void handleStatusUpdate() {
 //    if (tempRequest) Serial.println("**** TEMP REQUESTED ****");
     currentTemp = f; 
 #endif
-#if SENSOR_TYPE == DEVICE_LATCH 
+
+
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+    word t_temp, t_max, t_min;
+    sensors.requestTemperatures();
+    float f = sensors.getTempCByIndex(0);
+    if ((f < -120) || (f > 200)) f = currentTemp;
+    if (!(startup || forceUpdate || (millis() - heartbeat > HEARTBEAT) || 
+          (abs(currentTemp - f) > 1.0 ))) return;
+    if (abs(currentTemp - f) > 1.0 ) Serial.println("Forced temp update");
+
+    currentTemp = f;
+    device.t_temp = (int)f;
+    bool t_prevOn = device.t_on;
+    t_temp = device.t_temp;
+    if (t_temp !=0) {
+      if (device.t_celcius) {
+        t_min = device.t_minTemp;
+        t_max = device.t_maxTemp;
+      } else {
+        t_min = FtoC(device.t_minTemp);
+        t_max = FtoC(device.t_maxTemp);
+      }
+      t_temp = device.t_temp;
+      Serial.printf("temp %d, min %d, max %d\n",t_temp, t_min, t_max);
+      if ((t_max > 0 && t_min > 0 && t_max > t_min) || 
+          (t_max > 0 && device.t_minTime > 0) ) {
+        if (t_temp > t_max && device.t_on == false) {
+          Serial.printf("Turn On: temp: %d, max: %d\n",CtoF(device.t_temp), CtoF(device.t_maxTemp)); 
+          digitalWrite(RELAY, HIGH);
+          device.t_on = true;
+          if (device.t_minTime > 0) startTime = millis();
+        }
+        if (device.t_on) {
+          if (device.t_minTime > 0 && millis() - startTime > device.t_minTime * 60000) {
+              Serial.printf("Time Turn Off: temp: %d, min: %d\n",device.t_temp, device.t_minTemp); 
+              Serial.printf("\n\nmillis: %d, startTime: %d, millis - start: %d\n\n",millis(),startTime,millis()-startTime);
+              digitalWrite(RELAY, LOW);
+              Serial.println("Off 1");
+              device.t_on = false;               
+          } else {
+            if (device.t_minTime == 0 && t_temp < t_min) {
+              Serial.printf("Temp Turn Off: temp: %d, min: %d\n",device.t_temp, device.t_minTemp); 
+              digitalWrite(RELAY, LOW);
+              Serial.println("Off 2");
+              device.t_on = false;          
+            }
+          }
+        }
+      }
+    }  
+#endif
+
+
+#if DEVICE_TYPE == DEVICE_LATCH 
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate ||
-                   (switchValue != digitalRead(SWITCH)))) return;
+       (switchValue != digitalRead(SWITCH)))) return;
   switchValue = digitalRead(SWITCH);                   
 #endif
-#if SENSOR_TYPE == DEVICE_BAT
+
+#if DEVICE_TYPE == DEVICE_BAT
   processBatAlarm(); 
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
 #endif 
  
-#if SENSOR_TYPE == DEVICE_CURTAIN
+#if DEVICE_TYPE == DEVICE_CURTAIN
   processCurtain(); 
   if (motorRunning && !forceUpdate) return;
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
 #endif
   
-#if SENSOR_TYPE == DEVICE_GARAGE  
+#if DEVICE_TYPE == DEVICE_GARAGE  
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate ||
       doorUp != digitalRead(DOORUP) || doorDown != digitalRead(DOORDOWN))) return;
   doorUp = digitalRead(DOORUP);
@@ -259,24 +352,34 @@ void handleStatusUpdate() {
 
   StaticJsonDocument<256> json;
   json["mac"] = macID;
-  json["deviceType"] = SENSOR_TYPE;   
+  json["deviceType"] = DEVICE_TYPE;   
 
-  #if SENSOR_TYPE == DEVICE_GARAGE  
+  #if DEVICE_TYPE == DEVICE_GARAGE  
     json["sensor0"] = doorUp;
     json["sensor1"] = doorDown;
   #endif
-  #if SENSOR_TYPE == DEVICE_THERMOMETER  
+  #if DEVICE_TYPE == DEVICE_THERMOMETER  
     int temp =  (int)(currentTemp * 100);
     json["temp"] = temp;
   #endif
-  #if SENSOR_TYPE == DEVICE_LATCH  
+  #if DEVICE_TYPE == DEVICE_THERMOSTAT  
+    int temp =  (int)(currentTemp * 100);
+    json["t_temp"] = temp;
+    json["t_on"] = device.t_on;
+    if (t_prevOn != device.t_on){
+      String st = String(device.t_minTemp) + " " + String(device.t_maxTemp) + " " + String(device.t_minTime) + " " + String(device.t_on)+ " " + String(CtoF(device.t_temp)) + " " + String(device.t_on?" ON":" OFF");
+      json["deviceLog"] = st;
+      json["message"] = st;
+    }
+  #endif  
+  #if DEVICE_TYPE == DEVICE_LATCH  
     json["switchValue"] = switchValue?1:0;
   #endif
-  #if SENSOR_TYPE == DEVICE_BAT
+  #if DEVICE_TYPE == DEVICE_BAT
     json["pirValue"] = pirValue?1:0;
     json["alarmState"] = alarmState;
   #endif  
-  #if SENSOR_TYPE == DEVICE_CURTAIN
+  #if DEVICE_TYPE == DEVICE_CURTAIN
     json["currentPosition"] = device.currentPosition;
     json["rotationCount"] = device.rotationCount;
     json["motorReverse"] = device.motorReverse;
@@ -284,6 +387,8 @@ void handleStatusUpdate() {
     json["deviceColor"] = device.deviceColor;
   #endif   
   serializeJsonPretty(json,st);
+//  Serial.print("json = ");
+//  Serial.println(st);
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
@@ -295,11 +400,12 @@ void handleStatusUpdate() {
     }
   } else {
     Serial.printf("[HTTP] POST failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
+    Serial.printf("POST string = %s",st.c_str());
     findServer();
   }
 }
 
-#if SENSOR_TYPE == DEVICE_CURTAIN
+#if DEVICE_TYPE == DEVICE_CURTAIN
 
 ICACHE_RAM_ATTR void interrupt() {
   if (millis() - interruptTimer < 50) return;
@@ -450,9 +556,9 @@ void processCurtain(){
   }
 */  
 }
-#endif
+#endif //DEVICE_TYPE == CURTAIN
 
-#if SENSOR_TYPE == DEVICE_BAT
+#if DEVICE_TYPE == DEVICE_BAT
 void processBatAlarm(){
   if (pirValue != digitalRead(PIR)) forceUpdate = true;
   pirValue = digitalRead(PIR);
@@ -509,26 +615,31 @@ void processBatAlarm(){
 
 void startWiFi() {
   digitalWrite(LED,LOW);
-#if SENSOR_TYPE == DEVICE_GARAGE   
+#if DEVICE_TYPE == DEVICE_GARAGE   
   wifiManager.autoConnect("Garage Door Sensor");
 #endif
-#if SENSOR_TYPE == DEVICE_THERMOMETER   
+#if DEVICE_TYPE == DEVICE_THERMOMETER   
   wifiManager.autoConnect("Temperature Sensor");
 #endif
-#if SENSOR_TYPE == DEVICE_LATCH   
+#if DEVICE_TYPE == DEVICE_THERMOSTAT   
+  wifiManager.autoConnect("Thermostat Sensor");
+#endif
+#if DEVICE_TYPE == DEVICE_LATCH   
   wifiManager.autoConnect("Switch Sensor");
 #endif
-#if SENSOR_TYPE == DEVICE_BAT   
+#if DEVICE_TYPE == DEVICE_BAT   
   wifiManager.autoConnect("Motion Sensor");
 #endif
-#if SENSOR_TYPE == DEVICE_CURTAIN   
+#if DEVICE_TYPE == DEVICE_CURTAIN   
   wifiManager.autoConnect("Curtain");
 #endif
-digitalWrite(LED,HIGH);
+//  wifiManager.setAutoReconnect(true); //this stopped working on 9/10/21 for some reason??
+//  wifiManager.persistent(true);   //this stopped working on 9/10/21 for some reason??
+  digitalWrite(LED,HIGH);
 }
 
 void displayInfo() {
-#if SENSOR_TYPE == DEVICE_GARAGE  
+#if DEVICE_TYPE == DEVICE_GARAGE  
   String st;
   st = "Door Up = ";
   st += digitalRead(DOORUP);
@@ -538,7 +649,7 @@ void displayInfo() {
   st += macID + "\n";
   Serial.println(st);
 #endif
-#if SENSOR_TYPE == DEVICE_THERMOMETER
+#if DEVICE_TYPE == DEVICE_THERMOMETER
   // Send the command to get temperatures
   sensors.requestTemperatures(); 
   //print the temperature in Celsius
@@ -552,6 +663,21 @@ void displayInfo() {
   Serial.print(" "); //(char)0xb0);//shows degrees character
   Serial.println("F");
 #endif  
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+  // Send the command to get temperatures
+  sensors.requestTemperatures(); 
+  //print the temperature in Celsius
+  Serial.print("Temperature: ");
+  Serial.print(sensors.getTempCByIndex(0));
+  Serial.print(" "); //(char)0xb0);//shows degrees character
+  Serial.print("C  |  ");
+  
+  //print the temperature in Fahrenheit
+  Serial.print((sensors.getTempCByIndex(0) * 9.0) / 5.0 + 32.0);
+  Serial.print(" "); //(char)0xb0);//shows degrees character
+  Serial.println("F");
+  Serial.printf("on:%d, min:%d, max:%d, temp:%d, time:%d, celcius:%d\n",device.t_on, device.t_minTemp, device.t_maxTemp, device.t_temp, device.t_minTime, device.t_celcius);
+#endif
 }
 
 void handleUDP() {
@@ -624,21 +750,24 @@ void startServer() {
         digitalWrite(LED,LOW);
         server.send(HTTP_CODE_OK);
         
-#if SENSOR_TYPE == DEVICE_THERMOMETER
+#if DEVICE_TYPE == DEVICE_THERMOMETER
         delay (200); //let the LED blink
         forceUpdate = true;
 #endif        
-                
-#if SENSOR_TYPE == DEVICE_GARAGE        
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+        delay (200); //let the LED blink
+        forceUpdate = true;
+#endif                 
+#if DEVICE_TYPE == DEVICE_GARAGE        
         digitalWrite (DOORBUTTON, HIGH); //push the door opener button
         delay(200);   
         digitalWrite (DOORBUTTON, LOW);  //and release it
 #endif
-#if SENSOR_TYPE == DEVICE_LATCH
+#if DEVICE_TYPE == DEVICE_LATCH
         delay(200);   //just blink the LED
         forceUpdate = true;
 #endif
-#if SENSOR_TYPE == DEVICE_BAT
+#if DEVICE_TYPE == DEVICE_BAT
         if (alarmState == 0) { //toggle alarm
           digitalWrite(BAT_ALARM,HIGH);   //force a bat alarm
           Serial.println("Forced State 0 -> 1");
@@ -654,7 +783,7 @@ void startServer() {
         delay(200);   //just blink the LED
         forceUpdate = true; 
 #endif
-#if SENSOR_TYPE == DEVICE_CURTAIN
+#if DEVICE_TYPE == DEVICE_CURTAIN
         Serial.printf("motorRunning = %d\n",motorRunning);
         if (motorRunning) motorOff();
         else {
@@ -682,7 +811,7 @@ void startServer() {
         digitalWrite(LED,LOW);
         server.send(HTTP_CODE_OK);
         
-#if SENSOR_TYPE == DEVICE_BAT
+#if DEVICE_TYPE == DEVICE_BAT
         if (alarmState == 0) { // if alarm is off, turn it on
           digitalWrite(BAT_ALARM,HIGH);   //force a bat alarm
           Serial.println("Forced State 0 -> 1");
@@ -707,8 +836,53 @@ void startServer() {
         Name = getArgName(server.arg(i));
         Value = getArgValue(server.arg(i));
         Serial.printf("Name = |%s|, Value = |%s|\n",Name.c_str(),Value.c_str());
+        
+        if (Name.equals("deviceName")) {
+          Serial.print("/set device name = ");
+          Serial.println(Value);
+          strcpy(device.deviceName, Value.c_str());
+//          sprintf(device.deviceName, "%s", Value);
+        }
 
-#if SENSOR_TYPE == DEVICE_CURTAIN
+ 
+#if DEVICE_TYPE == DEVICE_THERMOSTAT
+        if (Name.equals("AC")) {
+          Serial.print("AC-> ");             
+          if (Value.equals("ON")) {
+            digitalWrite(RELAY, HIGH);
+            digitalWrite(LED, LOW);
+            Serial.print("On");
+          }
+          if (Value.equals("OFF")) {
+            digitalWrite(RELAY, LOW);
+            digitalWrite(LED, HIGH);
+            Serial.print("Off");             
+          }
+          Serial.println("");
+        }
+        if (Name.equals("t_minTemp")) {
+          device.t_minTemp = Value.toInt();
+          Serial.print("t_minTemp->");             
+          Serial.println(Value);
+        }
+        if (Name.equals("t_maxTemp")) {
+          device.t_maxTemp = Value.toInt();
+          Serial.print("t_maxTemp->");             
+          Serial.println(Value);
+        }        
+        if (Name.equals("t_celcius")) {
+          device.t_celcius = Value.toInt();
+          Serial.print("t_celcuis->");             
+          Serial.println(Value.toInt());
+        }        
+        if (Name.equals("t_minTime")) {
+          device.t_minTime = Value.toInt();
+          Serial.print("t_minTime->");             
+          Serial.println(Value.toInt());
+        } 
+#endif        
+
+#if DEVICE_TYPE == DEVICE_CURTAIN
         if (Name.equals("rotationCount")) {
           device.rotationCount = Value.toInt();
           String s = "rotationCount = " + String(device.rotationCount) + "\n";
@@ -812,10 +986,10 @@ void startMDNS() { // Start the mDNS responder
 
 void clearDevice() {
   memset(&device, '\0', sizeof(Device));   //clear devices array to 0's
-  device.deviceType = SENSOR_TYPE;
+  device.deviceType = DEVICE_TYPE;
   device.online = 0;
   device.timer = millis();
-#if SENSOR_TYPE == DEVICE_CURTAIN  
+#if DEVICE_TYPE == DEVICE_CURTAIN  
   device.currentPosition = 0;
   device.rotationCount = 0;
   device.upTime = 0;

@@ -197,6 +197,8 @@ void loop() {
   server.handleClient();                      // run the server
   processGarageDoors();   //run garage door state machine
   server.handleClient();                      // run the server
+  // processThermostats();   //Turn on/off thermostats
+  // server.handleClient();  
   processCurtains();      //check if curtain needs to be raised or lowered  
   server.handleClient();                      // run the server
   processHeartbeat();     //blink on-board led every 15 seconds
@@ -235,7 +237,7 @@ void processHeartbeat(){
 
 //used to turn on alarm on BAT devices
 void processBatAlarms(){
-    for (int i=0; i<MAX_DEVICES; i++) { //process send alarms for bat devices 
+  for (int i=0; i<MAX_DEVICES; i++) { //process send alarms for bat devices 
     if (devices[i].deviceType == DEVICE_BAT){
       if (devices[i].sendAlarm) {
         sendDeviceCommand(devices[i],"alarm");
@@ -282,6 +284,15 @@ void processAlarm() {
         if (devices[i].minTemp != 0 && devices[i].temp < (int)(round(float(devices[i].minTemp-32) * 5 / 9 * 100))) alarm = true;        
       }
     }  
+    if (devices[i].deviceType == DEVICE_THERMOSTAT) {
+      if (devices[i].t_celcius) {
+        if (devices[i].t_maxTemp != 0 && devices[i].t_temp > (devices[i].t_maxTemp + 2) * 100) alarm = true;        
+        if (devices[i].t_minTemp != 0 && devices[i].t_temp < (devices[i].t_minTemp - 2) * 100) alarm = true;       
+      } else {
+        if (devices[i].t_maxTemp != 0 && devices[i].t_temp > (int)(round(float(devices[i].t_maxTemp-32+3) * 5 / 9 * 100))) alarm = true;
+        if (devices[i].t_minTemp != 0 && devices[i].t_temp < (int)(round(float(devices[i].t_minTemp-32-3) * 5 / 9 * 100))) alarm = true;        
+      }
+    }
     if (devices[i].deviceType == DEVICE_CURTAIN) {
       if (devices[i].errorCode > 0) alarm = true;
     }  
@@ -432,6 +443,7 @@ String getJsonString() {
         json["devices"][i]["sensorSwap"] = devices[i].sensorSwap;        
         json["devices"][i]["closeDelay"] = devices[i].closeDelay;        
         json["devices"][i]["closeTime"] = devices[i].closeTime;        
+        json["devices"][i]["openTime"] = devices[i].openTime;        
       }
       if (devices[i].deviceType == DEVICE_THERMOMETER) {
         json["devices"][i]["temp"] = devices[i].temp;   
@@ -440,11 +452,12 @@ String getJsonString() {
         json["devices"][i]["celcius"] = devices[i].celcius;        
       }
       if (devices[i].deviceType == DEVICE_THERMOSTAT) {
-        json["devices"][i]["thermostat_temp"] = devices[i].thermostat_temp;   
-        json["devices"][i]["thermostat_onTemp"] = devices[i].thermostat_onTemp; 
-        json["devices"][i]["thermostat_offTemp"] = devices[i].thermostat_offTemp;        
-        json["devices"][i]["thermostat_minTime"] = devices[i].thermostat_minTime;        
-        json["devices"][i]["thermostat_celcius"] = devices[i].thermostat_celcius;        
+        json["devices"][i]["t_temp"] = devices[i].t_temp;   
+        json["devices"][i]["t_minTemp"] = devices[i].t_minTemp; 
+        json["devices"][i]["t_maxTemp"] = devices[i].t_maxTemp;        
+        json["devices"][i]["t_minTime"] = devices[i].t_minTime;        
+        json["devices"][i]["t_celcius"] = devices[i].t_celcius;        
+        json["devices"][i]["t_on"] = devices[i].t_on;        
       }
       if (devices[i].deviceType == DEVICE_LATCH) {
         json["devices"][i]["switchValue"] = devices[i].switchValue;
@@ -646,9 +659,12 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
             updateGui = true;
           }      
         STRCASE("deviceName")
-          String st = keyValue.value();    
-          st.toCharArray(devices[deviceIndex].deviceName, sizeof(devices[deviceIndex].deviceName));       
-          save = true;      
+          String st = keyValue.value();
+          st.toCharArray(devices[deviceIndex].deviceName,sizeof(devices[deviceIndex].deviceName));
+          String st2 = "deviceName=" + st;          
+//          st = st + keyValue.value();
+          sendDeviceCommand2(devices[deviceIndex],"/set",st2);
+          save = true;
         STRCASE("minTemp")
           devices[deviceIndex].minTemp = (int)keyValue.value();
           save = true;
@@ -658,15 +674,39 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
         STRCASE("celcius")
           devices[deviceIndex].celcius = (int)keyValue.value();
            save = true;
+        STRCASE("t_minTemp")
+          devices[deviceIndex].t_minTemp = (int)keyValue.value();
+          String st = keyValue.value();
+          st = "t_minTemp=" + st;
+          sendDeviceCommand2(devices[deviceIndex],"/set",st);
+          save = true;
+        STRCASE("t_maxTemp")
+          devices[deviceIndex].t_maxTemp = (int)keyValue.value();
+          String st = keyValue.value();
+          st = "t_maxTemp=" + st;
+          sendDeviceCommand2(devices[deviceIndex],"/set",st);
+          save = true;
+        STRCASE("t_celcius")
+          devices[deviceIndex].t_celcius = (int)keyValue.value();
+          String st = keyValue.value();
+          st = "t_celcius=" + st;
+          sendDeviceCommand2(devices[deviceIndex],"/set",st);
+           save = true;
+        STRCASE("t_minTime")
+          devices[deviceIndex].t_minTime = (int)keyValue.value();
+          String st = keyValue.value();
+          st = "t_minTime=" + st;
+          sendDeviceCommand2(devices[deviceIndex],"/set",st);
+          save = true;        
         STRCASE("closeDelay")
            devices[deviceIndex].closeDelay = (int)keyValue.value();
            save = true;
         STRCASE("closeTime")
            devices[deviceIndex].closeTime = (int)keyValue.value();
            save = true;
-        STRCASE("deleteLog")
-            deleteLogFile(deviceIndex);          
-            updateGui = true;
+        STRCASE("openTime")
+           devices[deviceIndex].openTime = (int)keyValue.value();
+           save = true;        
         STRCASE("startTime")
           devices[deviceIndex].startTime = (int)keyValue.value();
           save = true;        
@@ -719,8 +759,32 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
   if (save) saveSettings();
 }
 
+word CtoF(word temp) {
+  return ((temp * 9 / 5) + 32);
+}
+
+word FtoC(word temp) {
+  return ((temp - 32) * 5 / 9);
+}
+
 void startServer() { // Start a HTTP server with a file read handler and an upload handler
+/*
+  server.on("/upload", HTTP_GET, []() {                 // if the client requests the upload page
+    if (!handleFileRead("/upload.html"))                // send it if it exists
+      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
+
+  server.on("/upload", HTTP_POST,                       // if the client posts to the upload page
+    [](){ server.send(200); },                          // Send status 200 (OK) to tell the client we are ready to receive
+    handleFileUpload                                    // Receive and save the file
+  );
+
+  server.onNotFound([]() {                              // If the client requests any URI
+    if (!handleFileRead(server.uri()))                  // send it if it exists
+      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
   
+*/  
   server.on("/edit.html",  HTTP_POST, []() {  // If a POST request is sent to the /edit.html address,
     server.send(200, "text/plain", ""); 
   }, handleFileUpload);                       // go to 'handleFileUpload'
@@ -794,7 +858,31 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
           devices[deviceIndex].temp = (int)keyValue.value();
           devices[deviceIndex].deviceTime = getTime();
           updateGui = true;
-        
+        STRCASE("t_temp") 
+          devices[deviceIndex].t_temp = (int)keyValue.value();
+          devices[deviceIndex].deviceTime = getTime();
+          updateGui = true;
+        STRCASE("t_on") 
+          devices[deviceIndex].t_on = (int)keyValue.value();
+          devices[deviceIndex].deviceTime = getTime();
+          updateGui = true;           
+        STRCASE("deviceLog")
+          String st = keyValue.value();
+          deviceLog(deviceIndex, st); 
+/*          
+          int t_power = (int)keyValue.value();
+          String st = String(devices[deviceIndex].t_minTemp) + " " + String(devices[deviceIndex].t_maxTemp) + " " + String(devices[deviceIndex].t_minTime) + " " + String(CtoF(devices[deviceIndex].t_temp/100));
+          if (t_power != 0) {
+            st = st + " ON";
+            deviceLog(deviceIndex,st); 
+          } else {
+            st = st + " OFF";
+            deviceLog(deviceIndex,st);
+          }
+*/          
+        STRCASE("message")
+          String st = keyValue.value(); 
+          Serial.println(st);       
         STRCASE("switchValue") 
           bool switchVal = (bool)keyValue.value();
           if (devices[deviceIndex].switchReverse) switchVal = !switchVal;          
@@ -873,16 +961,41 @@ void deleteLogFile(int index){
 
 void logAlarm(int index, String type) {
   File f;
-  if (SPIFFS.exists("/log" + macToShortString(devices[index].mac) + ".txt")) 
-    f = SPIFFS.open("/log" + macToShortString(devices[index].mac) + ".txt","a");
-    else f = SPIFFS.open("/log" + macToShortString(devices[index].mac) + ".txt","w");
+  String st = "/log" + macToShortString(devices[index].mac) + ".txt";
+  if (SPIFFS.exists(st)) 
+    f = SPIFFS.open(st,"a");
+    else f = SPIFFS.open(st,"w");
   if (!f) {
     Serial.println ("Error opening file");
     return;
   }
-  String st = type + ":" + (String)devices[index].deviceTime; //verboseTime(devices[index].deviceTime + (timeOffset * 60 * 60));
+  String st2 = type + ":" + verboseTime(devices[index].deviceTime + (timeOffset * 60 * 60)); //(String)devices[index].deviceTime; //verboseTime(devices[index].deviceTime + (timeOffset * 60 * 60));
+  Serial.print("File Name: ");
+  Serial.print(st);
+  Serial.print("--");
+  Serial.println(st2);
 //  Serial.println(st);
-  f.println(st);
+  f.println(st2);
+  f.close();
+}
+
+void deviceLog(int index, String log) {
+  File f;
+  return;   //don't log for now
+  String st = "/log" + macToShortString(devices[index].mac) + ".txt";
+  if (SPIFFS.exists(st)) 
+    f = SPIFFS.open(st,"a");
+    else f = SPIFFS.open(st,"w");
+  if (!f) {
+    Serial.println ("Error opening file");
+    return;
+  }
+  String st2 = log + ":" + verboseTime(devices[index].deviceTime + (timeOffset * 60 * 60)); //(String)devices[index].deviceTime; //verboseTime(devices[index].deviceTime + (timeOffset * 60 * 60));
+  Serial.print("File Name: ");
+  Serial.print(st);
+  Serial.print("--");
+  Serial.println(st2);
+  f.println(st2);
   f.close();
 }
 
@@ -1003,6 +1116,8 @@ void displayDevice (int deviceIndex) {
     Serial.println (devices[deviceIndex].closeDelay); 
     Serial.print ("closeTime: ");
     Serial.println (devices[deviceIndex].closeTime);  
+    Serial.print ("OpenTime: ");
+    Serial.println (devices[deviceIndex].openTime);   
   }
   if (devices[deviceIndex].deviceType == DEVICE_THERMOMETER){
     Serial.print ("temp: ");
@@ -1016,15 +1131,17 @@ void displayDevice (int deviceIndex) {
   }
   if (devices[deviceIndex].deviceType == DEVICE_THERMOSTAT){
     Serial.print ("thermostat_temp: ");
-    Serial.println (devices[deviceIndex].thermostat_temp);    
-    Serial.print ("thermostat_onTemp: ");
-    Serial.println (devices[deviceIndex].thermostat_onTemp); 
-    Serial.print ("thermostat_offTemp: ");
-    Serial.println (devices[deviceIndex].thermostat_offTemp);  
+    Serial.println (devices[deviceIndex].t_temp);    
+    Serial.print ("thermostat_minTemp: ");
+    Serial.println (devices[deviceIndex].t_minTemp); 
+    Serial.print ("thermostat_maxTemp: ");
+    Serial.println (devices[deviceIndex].t_maxTemp);  
     Serial.print ("thermostat_minTime: ");
-    Serial.println (devices[deviceIndex].thermostat_minTime);   
+    Serial.println (devices[deviceIndex].t_minTime);   
     Serial.print ("thermostat_celcius: ");
-    Serial.println (devices[deviceIndex].thermostat_celcius);     
+    Serial.println (devices[deviceIndex].t_celcius);     
+    Serial.print ("thermostat_on: ");
+    Serial.println (devices[deviceIndex].t_on);    
   }  
   if (devices[deviceIndex].deviceType == DEVICE_CURTAIN){
     Serial.print ("upTime: ");
@@ -1091,7 +1208,10 @@ int setDevice (String mac, String var, String val) {
     }
     if (var == "deleteDevice") { 
       if (devices[deviceIndex].online == 0) deleteDevice(deviceIndex);
-    }    
+    }
+    if (var == "deleteLogFile"){
+      deleteLogFile(deviceIndex);    
+    }
   }
 }
 
@@ -1213,13 +1333,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght
               devices[index].latchValue = 0;
               Serial.printf ("Latch %d cleared\n",index);
               updateGui = true;
-            }
-/*            
-            if (devices[index].deviceType == DEVICE_CURTAIN) {
-              devices[index].currentPosition = 50;    //make the button display yellow
-              updateGui = true;
-            }          
-*/            
+            }           
           }
         }
         break;

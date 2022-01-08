@@ -24,6 +24,7 @@ var DEVICE_THERMOMETER = '2';
 var DEVICE_LATCH = '4';
 var DEVICE_BAT = '6';
 var DEVICE_CURTAIN = '7';
+var DEVICE_THERMOSTAT = '8';
 
 /********* GLOBAL VARIBLES ************/
 var timeOffset = 0;
@@ -62,11 +63,14 @@ function getDeviceJson(device) {
 		devicejson['closeDelay'] = parseInt(document.getElementById("CLOSEDELAY"+device.mac).value); 
 		
 		var value = document.getElementById("CLOSETIME"+device.mac).value
-
 		value = value.replace(/\D/g, '');
 		console.log("closeTime = " + parseInt(value));
+		devicejson['closeTime'] = parseInt(value);
 
-		devicejson['closeTime'] = parseInt(value); 
+		value = document.getElementById("OPENTIME"+device.mac).value
+		value = value.replace(/\D/g, '');
+		console.log("openTime = " + parseInt(value));
+		devicejson['openTime'] = parseInt(value); 
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		devicejson['minTemp'] = parseInt(document.getElementById("MINTEMP"+device.mac).value); 
@@ -82,6 +86,12 @@ function getDeviceJson(device) {
 		devicejson['downTime'] = parseInt(document.getElementById("DOWNTIME"+device.mac).value); 
 		devicejson['rotationCount'] = parseInt(document.getElementById("ROTATIONCOUNT"+device.mac).value); 
 	}		
+	if (device.deviceType == DEVICE_THERMOSTAT) {
+		devicejson['t_minTemp'] = parseInt(document.getElementById("T_MINTEMP"+device.mac).value); 
+		devicejson['t_maxTemp'] = parseInt(document.getElementById("T_MAXTEMP"+device.mac).value); 
+		devicejson['t_minTime'] = parseInt(document.getElementById("T_MINTIME"+device.mac).value); 
+		devicejson['t_celcius'] = document.getElementById("T_CELCIUS"+device.mac).checked?1:0;
+	}	
 	return devicejson;
 }
 
@@ -252,12 +262,29 @@ function addDoorTextBox (device, container) {
 		closeTime.id = 'CLOSETIME' + device.mac;
 		closeTime.setAttribute('mac',device.mac);
 		closeTime.value = device.closeTime;
-		
+
+		var openTime = document.createElement('input'); // time to automatically close
+		openTime.style.width = '45px';
+		openTime.style.height = '20px';
+		openTime.style.marginTop = '4px';
+		openTime.style.marginLeft = '5px';
+		openTime.style.marginRight = '5px';
+		openTime.style.marginBottom = '3px';
+		openTime.style.textAlign = 'center';
+		openTime.style.borderRadius = '10px';
+		openTime.style.color = 'black';
+		openTime.style.fontSize = '20px';
+		openTime.maxLength = 5;
+		openTime.id = 'OPENTIME' + device.mac;
+		openTime.setAttribute('mac',device.mac);
+		openTime.value = device.openTime;
+
 		var t0 = document.createTextNode("");
 		var t1 = document.createTextNode("Auto Close After");
 		var t2 = document.createTextNode("Minutes");
 		var t3 = document.createTextNode("Auto Close at");
 		var t4 = document.createTextNode("(9pm=2100)");
+		var t5 = document.createTextNode("Auto Open at");
 	}	
 
 	
@@ -308,6 +335,71 @@ function addDoorTextBox (device, container) {
 		var mn = document.createTextNode("Min ");
 		var mx = document.createTextNode("Max ");
 		var cel = document.createTextNode("\xB0C");
+	}
+
+	if (device.deviceType == DEVICE_THERMOSTAT) {
+		var max = document.createElement('input'); // max temp input		
+		max.style.width = '40px';
+		max.style.height = '20px';
+		max.style.marginTop = '4px';
+		max.style.marginLeft = '0px';
+		max.style.marginRight = '10px';
+		max.style.marginBottom = '3px';
+		max.style.textAlign = 'center';
+		max.style.borderRadius = '10px';
+		max.style.color = 'black';
+		max.style.fontSize = '20px';
+		max.maxLength = 3;
+		max.id = 'T_MAXTEMP' + device.mac;
+		max.value = device.t_maxTemp;
+
+		var min = document.createElement('input'); // min temp input
+		min.style.width = '40px';
+		min.style.height = '20px';
+		min.style.marginTop = '4px';
+		min.style.marginLeft = '2px';
+		min.style.marginRight = '10px';
+		min.style.marginBottom = '3px';
+		min.style.textAlign = 'center';
+		min.style.borderRadius = '10px';
+		min.style.color = 'black';
+		min.style.fontSize = '20px';
+		min.maxLength = 3;
+		min.id = 'T_MINTEMP' + device.mac;
+		min.value = device.t_minTemp;
+
+		var mintime = document.createElement('input'); // min mintime
+		mintime.style.width = '40px';
+		mintime.style.height = '20px';
+		mintime.style.marginTop = '4px';
+		mintime.style.marginLeft = '2px';
+		mintime.style.marginRight = '10px';
+		mintime.style.marginBottom = '3px';
+		mintime.style.textAlign = 'center';
+		mintime.style.borderRadius = '10px';
+		mintime.style.color = 'black';
+		mintime.style.fontSize = '20px';
+		mintime.maxLength = 3;
+		mintime.id = 'T_MINTIME' + device.mac;
+		mintime.value = device.t_minTime;
+
+		var celcius = document.createElement('input'); // celcius check box
+		celcius.setAttribute("type", "checkbox");
+		celcius.style.width = '15px';
+		celcius.style.height = '20px';
+		celcius.style.marginBottom = '6px';
+		celcius.style.marginLeft = '2px';
+		celcius.style.marginRight = '0px';
+		celcius.style.verticalAlign = 'bottom';
+		celcius.style.color = 'black';
+		celcius.style.fontSize = '20px';
+		celcius.id = 'T_CELCIUS' + device.mac;
+		celcius.checked = (device.t_celcius == 1)?true:false;
+		
+		var mn = document.createTextNode("Min ");
+		var mx = document.createTextNode("Max ");
+		var cel = document.createTextNode("\xB0C");
+		var tm = document.createTextNode("Min Time");
 	}
 
 	if (device.deviceType == DEVICE_BAT) {
@@ -463,6 +555,19 @@ function addDoorTextBox (device, container) {
 		icon_therm.style.backgroundColor = WHITE;
 		container.appendChild(icon_therm);
 	}
+	if (device.deviceType == DEVICE_THERMOSTAT) {
+		var icon_tstat = document.createElement('img');
+		icon_tstat.src = 'https://api.iconify.design/mdi:thermostat.svg?color=%230099ff'
+		icon_tstat.style.width = '30px';
+		icon_tstat.style.height = '30px';
+		icon_tstat.style.verticalAlign = '-5px';
+		icon_tstat.style.backgroundColor = WHITE;
+		icon_tstat.setAttribute("mac",device.mac);
+		icon_tstat.onclick = function() {
+			deleteLog(icon_tstat);
+		};			
+		container.appendChild(icon_tstat);
+	}
 	if (device.deviceType == DEVICE_GARAGE) {
 		var icon_house = document.createElement('img');
 		icon_house.src =  'https://api.iconify.design/mdi:garage.svg?color=%230099ff';
@@ -516,6 +621,7 @@ function addDoorTextBox (device, container) {
 	var tb = document.createElement('input'); // Create Text Box
 	if (device.deviceType == DEVICE_GARAGE) tb.style.width = screenWidth - 140 + 'px'; //"150px"; //220px";  //container.style.width - b1.style.width; //  '95%';
 	if (device.deviceType == DEVICE_THERMOMETER) tb.style.width = screenWidth - 140 + 'px'; //'95%';
+	if (device.deviceType == DEVICE_THERMOSTAT) tb.style.width = screenWidth - 140 + 'px'; //'95%';
 	if (device.deviceType == DEVICE_LATCH) tb.style.width = screenWidth - 140 + 'px';
 	if (device.deviceType == DEVICE_BAT) tb.style.width = screenWidth - 140 + 'px';
 	if (device.deviceType == DEVICE_CURTAIN) tb.style.width = screenWidth - 140 + 'px';
@@ -537,13 +643,16 @@ function addDoorTextBox (device, container) {
 		
 		container.appendChild(t0);
 		container.appendChild(br);
+		container.appendChild(t3);
+		container.appendChild(openTime);
+		container.appendChild(t5);		
+		container.appendChild(br);
+		container.appendChild(closeTime);
+		container.appendChild(t4);
+		container.appendChild(br);
 		container.appendChild(t1);		
 		container.appendChild(closeDelay);
 		container.appendChild(t2);
-		container.appendChild(br);
-		container.appendChild(t3);
-		container.appendChild(closeTime);
-		container.appendChild(t4);
 	}
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		container.appendChild(br);
@@ -553,6 +662,18 @@ function addDoorTextBox (device, container) {
 		container.appendChild(max);
 		container.appendChild(cel);
 		container.appendChild(celcius);
+	}
+	if (device.deviceType == DEVICE_THERMOSTAT) {
+		container.appendChild(br);
+		container.appendChild(mn);		
+		container.appendChild(min);
+		container.appendChild(mx);
+		container.appendChild(max);
+		container.appendChild(cel);
+		container.appendChild(celcius);
+		container.appendChild(br);
+		container.appendChild(tm);
+		container.appendChild(mintime);
 	}
 	if (device.deviceType == DEVICE_BAT) {
 		container.appendChild(br);
@@ -874,20 +995,11 @@ function loadPirLog() {
 	document.getElementById("pir_log").innerHTML = st;
 }
 
-function clearLog() {
-	console.log('**** Clear Log ******');
-//	console.log ('Button.id = ' + button.id + ' mac = ' + button.getAttribute('mac'));
-	var params = getParams(window.location.href);
-	var ip = params.log.substring(params.log.indexOf('/log') + 4,params.log.indexOf('.txt'));
-	for (i=10; i>0; i=i-2) ip = ip.insertAt(':',i);
-	console.log ('ip = ',ip);
-
-	devicejson = {};
-	devicejson['mac'] = ip;
-	devicejson['deleteLog'] = 99;	
-	var st = JSON.stringify(devicejson);
-	console.log("deleteLog json = " + st);
-	connection.send('^' + st);
+function deleteLog(button){
+	console.log('Button press...' + button.getAttribute('mac'));
+	console.log('Delete Log ' + button.id);
+	var st = "*" + button.getAttribute("mac") + "?deleteLogFile=0";
+	connection.send(st);
 	location.reload();
 }
 
@@ -958,6 +1070,22 @@ function getDeviceColor(device){
 		} else {
 			if ((t > device.maxTemp) && (device.maxTemp != 0)) return OFFLINE_RED;
 			else if ((t < device.minTemp) && (device.minTemp != 0)) return OFFLINE_RED;
+			else return OFFLINE_GREEN;			
+		}
+	}
+
+	if (device.deviceType == DEVICE_THERMOSTAT) {
+		var t;
+
+		if (device.celcius == true) t = Math.round(device.t_temp / 100); else t = (Math.round((device.t_temp / 100) * 9/5) + 32);
+		console.log (device.t_minTemp + ' ' + device.t_maxTemp + ' ' + device.t_temp + ' ' + device.t_on);
+		if (device.online) {
+			if ((t < device.t_minTemp - 3) && (device.t_minTemp != 0)) return RED;
+			else if ((t > device.t_maxTemp + 3) && (device.t_maxTemp != 0)) return RED;
+			else return GREEN;
+		} else {
+			if ((t > device.t_maxTemp + 3) && (device.t_maxTemp != 0)) return OFFLINE_RED;
+			else if ((t < device.t_minTemp - 3) && (device.t_minTemp != 0)) return OFFLINE_RED;
 			else return OFFLINE_GREEN;			
 		}
 	}
@@ -1098,6 +1226,17 @@ function processJson(jsonString){
 					var deviceTime = timeString(json.devices[i].deviceTime);
 					var degC = Math.round(json.devices[i].temp / 100) + "\xB0 C";
 					var degF = Math.round( ((json.devices[i].temp / 100) * 9/5) + 32) + "\xB0 F";
+					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degF + ' / ' + degC + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
+					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
+				}
+				if (json.devices[i].deviceType == DEVICE_THERMOSTAT) {
+
+					button.style.backgroundColor = getDeviceColor(json.devices[i]);
+
+					var st = "Last Read ";
+					var deviceTime = timeString(json.devices[i].deviceTime);
+					var degC = Math.round(json.devices[i].t_temp / 100) + "\xB0 C";
+					var degF = Math.round( ((json.devices[i].t_temp / 100) * 9/5) + 32) + "\xB0 F";
 					if (json.devices[i].online == 1) button.innerHTML = "<p class='pbutton1'>" + degF + ' / ' + degC + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 					else button.innerHTML = "<p class='pbutton1'>" + "OFFLINE" + "</p></br><p class='pbutton2'>" + json.devices[i].deviceName + " @ " + deviceTime + "</p>";
 				}
