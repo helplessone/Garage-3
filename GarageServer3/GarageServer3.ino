@@ -295,7 +295,18 @@ void processAlarm() {
     }
     if (devices[i].deviceType == DEVICE_CURTAIN) {
       if (devices[i].errorCode > 0) alarm = true;
-    }  
+    }
+    if (devices[i].deviceType == DEVICE_INTERVAL_TIMER) {
+      if (devices[i].it_on && (devices[i].it_currTime > 20000) && (devices[i].it_flowSensorCount <= 10)) {
+        alarm = true;
+        devices[i].errorCode = 1;
+      }
+      if (devices[i].errorCode != 0) alarm = true;
+      if (devices[i].it_on && (devices[i].it_flowSensorCount > 10)) {
+        alarm = false;
+        devices[i].errorCode = 0;
+      }
+    }          
   }
   if (alarm) digitalWrite (LASER, LOW); else digitalWrite(LASER, HIGH);
 }
@@ -471,6 +482,13 @@ String getJsonString() {
         json["devices"][i]["startTime"] = devices[i].startTime;      
         json["devices"][i]["stopTime"] = devices[i].stopTime;      
       }    
+      if (devices[i].deviceType == DEVICE_INTERVAL_TIMER) {
+        json["devices"][i]["it_onTime"] = devices[i].it_onTime;      
+        json["devices"][i]["it_offTime"] = devices[i].it_offTime;      
+        json["devices"][i]["it_on"] = devices[i].it_on?"1":"0"; 
+        json["devices"][i]["it_currTime"] = devices[i].it_currTime;     
+        json["devices"][i]["it_flowSensorCount"] = devices[i].it_flowSensorCount;     
+      } 
       if (devices[i].deviceType == DEVICE_CURTAIN) {
 //        Serial.printf("DEVICE CURTAIN: %d %d %d %d %s\n",devices[i].upTime,devices[i].downTime,devices[i].currentPosition,devices[i].rotationCount,devices[i].motorReverse?"1":"0");
         json["devices"][i]["upTime"] = devices[i].upTime;      
@@ -660,11 +678,12 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           }      
         STRCASE("deviceName")
           String st = keyValue.value();
-          st.toCharArray(devices[deviceIndex].deviceName,sizeof(devices[deviceIndex].deviceName));
-          String st2 = "deviceName=" + st;          
-//          st = st + keyValue.value();
-          sendDeviceCommand2(devices[deviceIndex],"/set",st2);
-          save = true;
+          if (strcmp(st.c_str(),devices[deviceIndex].deviceName) != 0) {
+            st.toCharArray(devices[deviceIndex].deviceName,sizeof(devices[deviceIndex].deviceName));
+            String st2 = "deviceName=" + st;          
+            sendDeviceCommand2(devices[deviceIndex],"/set",st2);
+            save = true;
+          } else Serial.println("--Skipped saving name");
         STRCASE("minTemp")
           devices[deviceIndex].minTemp = (int)keyValue.value();
           save = true;
@@ -675,29 +694,55 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           devices[deviceIndex].celcius = (int)keyValue.value();
            save = true;
         STRCASE("t_minTemp")
-          devices[deviceIndex].t_minTemp = (int)keyValue.value();
-          String st = keyValue.value();
-          st = "t_minTemp=" + st;
-          sendDeviceCommand2(devices[deviceIndex],"/set",st);
-          save = true;
+          if (devices[deviceIndex].t_minTemp != (int)keyValue.value()) {
+            devices[deviceIndex].t_minTemp = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "t_minTemp=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true;
+          } else Serial.println("--Skipped saving t_minTemp");
         STRCASE("t_maxTemp")
-          devices[deviceIndex].t_maxTemp = (int)keyValue.value();
-          String st = keyValue.value();
-          st = "t_maxTemp=" + st;
-          sendDeviceCommand2(devices[deviceIndex],"/set",st);
-          save = true;
+          if (devices[deviceIndex].t_maxTemp != (int)keyValue.value()) {
+            devices[deviceIndex].t_maxTemp = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "t_maxTemp=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true;
+          } else Serial.println("--Skipped saving t_maxTemp");
         STRCASE("t_celcius")
-          devices[deviceIndex].t_celcius = (int)keyValue.value();
-          String st = keyValue.value();
-          st = "t_celcius=" + st;
-          sendDeviceCommand2(devices[deviceIndex],"/set",st);
-           save = true;
+          if (devices[deviceIndex].t_celcius != (int)keyValue.value()) {
+            devices[deviceIndex].t_celcius = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "t_celcius=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true;
+          } else Serial.println("--Skipped saving t_celcius");
         STRCASE("t_minTime")
-          devices[deviceIndex].t_minTime = (int)keyValue.value();
-          String st = keyValue.value();
-          st = "t_minTime=" + st;
-          sendDeviceCommand2(devices[deviceIndex],"/set",st);
-          save = true;        
+          if (devices[deviceIndex].t_minTime != (int)keyValue.value()) {
+            devices[deviceIndex].t_minTime = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "t_minTime=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true;
+          } else Serial.println("--Skipped saving t_minTime");
+//For INTERVAL_TIMER                  
+        STRCASE("it_onTime")
+          if (devices[deviceIndex].it_onTime != (int)keyValue.value()) {
+            devices[deviceIndex].it_onTime = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "it_onTime=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true;           
+          } else Serial.println("--Skipped saving it_onTime");
+        STRCASE("it_offTime")
+          if (devices[deviceIndex].it_offTime != (int)keyValue.value()) {
+            devices[deviceIndex].it_offTime = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "it_offTime=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"/set",st);
+            save = true; 
+          } else Serial.println("--Skipped saving it_offTime");
+//End INTERVAL_TIMER           
         STRCASE("closeDelay")
            devices[deviceIndex].closeDelay = (int)keyValue.value();
            save = true;
@@ -721,11 +766,13 @@ void updateDevice(String data) {  // This routine invoked by '^' from javascript
           save = true;
         STRCASE("rotationCount")
           displayDevice(deviceIndex);
-          devices[deviceIndex].rotationCount = (int)keyValue.value();
-          String st = keyValue.value();
-          st = "rotationCount=" + st;
-          sendDeviceCommand2(devices[deviceIndex],"set",st);
-          save = true;
+          if (devices[deviceIndex].rotationCount != (int)keyValue.value()) {
+            devices[deviceIndex].rotationCount = (int)keyValue.value();
+            String st = keyValue.value();
+            st = "rotationCount=" + st;
+            sendDeviceCommand2(devices[deviceIndex],"set",st);
+            save = true;
+          } else Serial.println("--Skipped saving rotationCount");            
         STRCASE("motorReverse") 
           sendDeviceCommand2(devices[deviceIndex],"set","motorReverse");
           updateGui = true;
@@ -935,8 +982,23 @@ void startServer() { // Start a HTTP server with a file read handler and an uplo
         STRCASE("alarmState") 
           devices[deviceIndex].alarmState = (int)keyValue.value();
           updateGui = true;
-        
-      }     
+/*          
+        STRCASE("it_onTime") 
+          devices[deviceIndex].it_onTime = (int)keyValue.value();
+          updateGui = true;        
+        STRCASE("if_offTime") 
+          devices[deviceIndex].it_offTime = (int)keyValue.value();
+          updateGui = true;        
+*/          
+        STRCASE("it_currTime") 
+          devices[deviceIndex].it_currTime = (int)keyValue.value();
+          updateGui = true;        
+        STRCASE("it_on") 
+          devices[deviceIndex].it_on = (int)keyValue.value();
+          updateGui = true;        
+        STRCASE("it_flowSensorCount") 
+          devices[deviceIndex].it_flowSensorCount = (int)keyValue.value();
+          updateGui = true;       }     
     }
     if (save) saveSettings();
     server.send(200,"text/plain","ok");
@@ -1155,6 +1217,15 @@ void displayDevice (int deviceIndex) {
     Serial.print ("motorReverse: ");
     if (devices[deviceIndex].motorReverse != 0) Serial.println ("1"); else Serial.println ("0"); 
   }
+   if (devices[deviceIndex].deviceType == DEVICE_INTERVAL_TIMER){
+    Serial.print ("it_onTime: ");
+    Serial.println (devices[deviceIndex].it_onTime);    
+    Serial.print ("it_offTime: ");
+    Serial.println (devices[deviceIndex].it_offTime); 
+    Serial.print ("it_on: ");
+    Serial.println (devices[deviceIndex].it_on);  
+    Serial.print ("it_flowSensorCount: ");
+    Serial.println (devices[deviceIndex].it_flowSensorCount);   } 
   Serial.println("****************************");
 }
 

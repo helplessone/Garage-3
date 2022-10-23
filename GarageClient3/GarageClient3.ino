@@ -1,13 +1,14 @@
 #include <LiquidCrystal.h>
 
 //#define DEVICE_TYPE DEVICE_GARAGE
-#define DEVICE_TYPE DEVICE_THERMOMETER
+//#define DEVICE_TYPE DEVICE_THERMOMETER
 //#define DEVICE_TYPE DEVICE_LATCH
 //#define DEVICE_TYPE DEVICE_BAT
 //#define DEVICE_TYPE DEVICE_CURTAIN
 //#define DEVICE_TYPE DEVICE_THERMOSTAT
+#define DEVICE_TYPE DEVICE_INTERVAL_TIMER
 
-#define ESP8266;
+#define ESP8266
 #include <IotSensors.h>
 #define ARDUINO 10808
 
@@ -87,6 +88,15 @@ Device device;
   #define deviceTypeString "LATCH"
   #define SWITCH 4      // (D2) Input: 0 if door is up
   bool switchValue;
+#endif
+
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+  #define deviceTypeString "ITIMER"
+  #define RELAY 14  // (D5) Output: set HIGH to close relay
+  #define FLOWSENSOR 4 // (D2) Input form flow sensor)
+  unsigned long intervalTimer;
+  unsigned long flowSensorTimer;
+  volatile byte flowSensorCount;
 #endif
 
 #if DEVICE_TYPE == DEVICE_BAT
@@ -177,6 +187,17 @@ void setup() {
   alarmState = 0;
 #endif 
 
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+  pinMode(RELAY, OUTPUT);
+  digitalWrite (RELAY, HIGH);  //Turn on relay  
+  pinMode(FLOWSENSOR, INPUT);
+  device.it_on = true; 
+  intervalTimer = millis();
+  flowSensorTimer = millis();
+  flowSensorCount = 0;
+  attachInterrupt(FLOWSENSOR, flowSensorInterrupt, FALLING);
+#endif 
+
 #if DEVICE_TYPE == DEVICE_CURTAIN
   pinMode(IR, INPUT);
   attachInterrupt(digitalPinToInterrupt(IR), interrupt, RISING);
@@ -237,6 +258,12 @@ void loop() {
   server.handleClient();
   delay(1);
 }
+
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+  ICACHE_RAM_ATTR void flowSensorInterrupt (){
+    flowSensorCount++;
+  }
+#endif 
 
 word CtoF(word temp) {
   return ((temp * 9 / 5) + 32);
@@ -327,7 +354,38 @@ void handleStatusUpdate() {
   processBatAlarm(); 
   if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
 #endif 
- 
+
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+  if (millis() - flowSensorTimer > 1000) {
+    flowSensorTimer = millis();
+    device.it_flowSensorCount = flowSensorCount;
+    flowSensorCount = 0;
+  }
+  device.it_currTime = millis() - intervalTimer;
+  if (device.it_on) {
+    if (device.it_currTime > device.it_onTime * 60000) {
+      String s = "Turn Off " + String(device.it_onTime) + " " + String(device.it_offTime);
+      Serial.println(s);
+      digitalWrite(RELAY, LOW);
+      device.it_on = false; 
+      intervalTimer = millis();
+      device.it_currTime = millis() - intervalTimer;
+      forceUpdate = true;
+    }
+  } else {
+    if (device.it_currTime > device.it_offTime * 60000) { 
+      String s = "Turn On " + String(device.it_onTime) + " " + String(device.it_offTime);
+      Serial.println(s);
+      digitalWrite(RELAY, HIGH);
+      device.it_on = true; 
+      intervalTimer = millis();
+      device.it_currTime = millis() - intervalTimer;
+      forceUpdate = true;
+    }
+  }
+  if (!(startup || (millis() - heartbeat > HEARTBEAT) || forceUpdate)) return;
+#endif 
+
 #if DEVICE_TYPE == DEVICE_CURTAIN
   processCurtain(); 
   if (motorRunning && !forceUpdate) return;
@@ -379,6 +437,13 @@ void handleStatusUpdate() {
     json["pirValue"] = pirValue?1:0;
     json["alarmState"] = alarmState;
   #endif  
+  #if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+    json["it_currTime"] = device.it_currTime;
+    json["it_on"] = device.it_on?1:0;
+    json["it_flowSensorCount"] = device.it_flowSensorCount;
+    Serial.print ("Flow Sensor Count= ");
+    Serial.println (device.it_flowSensorCount);
+  #endif  
   #if DEVICE_TYPE == DEVICE_CURTAIN
     json["currentPosition"] = device.currentPosition;
     json["rotationCount"] = device.rotationCount;
@@ -387,8 +452,13 @@ void handleStatusUpdate() {
     json["deviceColor"] = device.deviceColor;
   #endif   
   serializeJsonPretty(json,st);
-//  Serial.print("json = ");
-//  Serial.println(st);
+  #if DEVICE_TYPE == DEVICE_INTERVAL_TIMER
+//    Serial.print("handleStatusUpdate() POST json = ");
+//    Serial.println(st);
+//    String s = String(device.deviceName) + " On:" + String(device.it_onTime) + " Off:" + String(device.it_offTime) + " Curr:";
+//    Serial.print(s);
+//    Serial.println(device.it_currTime);
+  #endif
   int httpCode = http.POST(st);
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
@@ -633,6 +703,9 @@ void startWiFi() {
 #if DEVICE_TYPE == DEVICE_CURTAIN   
   wifiManager.autoConnect("Curtain");
 #endif
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER   
+  wifiManager.autoConnect("Interval Timer");
+#endif
 //  wifiManager.setAutoReconnect(true); //this stopped working on 9/10/21 for some reason??
 //  wifiManager.persistent(true);   //this stopped working on 9/10/21 for some reason??
   digitalWrite(LED,HIGH);
@@ -757,7 +830,26 @@ void startServer() {
 #if DEVICE_TYPE == DEVICE_THERMOSTAT
         delay (200); //let the LED blink
         forceUpdate = true;
-#endif                 
+#endif               
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER  //Toggle current state of pump
+  if (device.it_on) {
+    String s = "Turn Off " + String(device.it_onTime) + " " + String(device.it_offTime);
+    Serial.println(s);
+    digitalWrite(RELAY, LOW);
+    device.it_on = false; 
+    intervalTimer = millis();
+    device.it_currTime = millis() - intervalTimer;
+    forceUpdate = true;
+  } else {
+    String s = "Turn On " + String(device.it_onTime) + " " + String(device.it_offTime);
+    Serial.println(s);
+    digitalWrite(RELAY, HIGH);
+    device.it_on = true; 
+    intervalTimer = millis();
+    device.it_currTime = millis() - intervalTimer;
+    forceUpdate = true;
+  }
+#endif  
 #if DEVICE_TYPE == DEVICE_GARAGE        
         digitalWrite (DOORBUTTON, HIGH); //push the door opener button
         delay(200);   
@@ -844,6 +936,18 @@ void startServer() {
 //          sprintf(device.deviceName, "%s", Value);
         }
 
+#if DEVICE_TYPE == DEVICE_INTERVAL_TIMER     
+        if (Name.equals("it_onTime")) {
+          device.it_onTime = Value.toInt();
+          Serial.print("it_onTime->");             
+          Serial.println(Value.toInt());
+        } 
+        if (Name.equals("it_offTime")) {
+          device.it_offTime = Value.toInt();
+          Serial.print("it_offTime->");             
+          Serial.println(Value.toInt());
+        } 
+#endif     
  
 #if DEVICE_TYPE == DEVICE_THERMOSTAT
         if (Name.equals("AC")) {

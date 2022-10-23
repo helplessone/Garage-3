@@ -25,6 +25,7 @@ var DEVICE_LATCH = '4';
 var DEVICE_BAT = '6';
 var DEVICE_CURTAIN = '7';
 var DEVICE_THERMOSTAT = '8';
+var DEVICE_INTERVAL_TIMER = '9';
 
 /********* GLOBAL VARIBLES ************/
 var timeOffset = 0;
@@ -92,6 +93,10 @@ function getDeviceJson(device) {
 		devicejson['t_minTime'] = parseInt(document.getElementById("T_MINTIME"+device.mac).value); 
 		devicejson['t_celcius'] = document.getElementById("T_CELCIUS"+device.mac).checked?1:0;
 	}	
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) {
+		devicejson['it_onTime'] = parseInt(document.getElementById("IT_ONTIME"+device.mac).value); 
+		devicejson['it_offTime'] = parseInt(document.getElementById("IT_OFFTIME"+device.mac).value); 
+	}		
 	return devicejson;
 }
 
@@ -337,6 +342,42 @@ function addDoorTextBox (device, container) {
 		var cel = document.createTextNode("\xB0C");
 	}
 
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) {
+		var ontime = document.createElement('input'); // onTime input		
+		ontime.style.width = '40px';
+		ontime.style.height = '20px';
+		ontime.style.marginTop = '4px';
+		ontime.style.marginLeft = '0px';
+		ontime.style.marginRight = '10px';
+		ontime.style.marginBottom = '3px';
+		ontime.style.textAlign = 'center';
+		ontime.style.borderRadius = '10px';
+		ontime.style.color = 'black';
+		ontime.style.fontSize = '20px';
+		ontime.maxLength = 3;
+		ontime.id = 'IT_ONTIME' + device.mac;
+		ontime.value = device.it_onTime;
+
+		var offtime = document.createElement('input'); // offTime input
+		offtime.style.width = '40px';
+		offtime.style.height = '20px';
+		offtime.style.marginTop = '4px';
+		offtime.style.marginLeft = '2px';
+		offtime.style.marginRight = '10px';
+		offtime.style.marginBottom = '3px';
+		offtime.style.textAlign = 'center';
+		offtime.style.borderRadius = '10px';
+		offtime.style.color = 'black';
+		offtime.style.fontSize = '20px';
+		offtime.maxLength = 3;
+		offtime.id = 'IT_OFFTIME' + device.mac;
+		offtime.value = device.it_offTime;
+		
+		var it_on = document.createTextNode("On Time (min) ");
+		var it_off = document.createTextNode("Off Time ");
+	}
+
+
 	if (device.deviceType == DEVICE_THERMOSTAT) {
 		var max = document.createElement('input'); // max temp input		
 		max.style.width = '40px';
@@ -545,6 +586,17 @@ function addDoorTextBox (device, container) {
 		var rotationtext = document.createTextNode("Rotations ")
 	}
 
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) {
+		var icon_interval = document.createElement('img');
+//		icon_interval.src =  'https://api.iconify.design/openmoji:thermometer.svg';
+		icon_interval.src =  'https://api.iconify.design/gis/timer.svg?color=%230099ff';
+		icon_interval.style.width = '30px';
+		icon_interval.style.height = '30px';
+		icon_interval.style.verticalAlign = '-5px';
+		icon_interval.style.backgroundColor = WHITE;
+		container.appendChild(icon_interval);
+	}
+
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		var icon_therm = document.createElement('img');
 //		icon_therm.src =  'https://api.iconify.design/openmoji:thermometer.svg';
@@ -625,6 +677,7 @@ function addDoorTextBox (device, container) {
 	if (device.deviceType == DEVICE_LATCH) tb.style.width = screenWidth - 140 + 'px';
 	if (device.deviceType == DEVICE_BAT) tb.style.width = screenWidth - 140 + 'px';
 	if (device.deviceType == DEVICE_CURTAIN) tb.style.width = screenWidth - 140 + 'px';
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) tb.style.width = screenWidth - 140 + 'px';
 
 	tb.style.height = '40px';
 	tb.style.marginTop = '2px';
@@ -662,6 +715,13 @@ function addDoorTextBox (device, container) {
 		container.appendChild(max);
 		container.appendChild(cel);
 		container.appendChild(celcius);
+	}
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) {
+		container.appendChild(br);
+		container.appendChild(it_on);		
+		container.appendChild(ontime);
+		container.appendChild(it_off);
+		container.appendChild(offtime);
 	}
 	if (device.deviceType == DEVICE_THERMOSTAT) {
 		container.appendChild(br);
@@ -1060,7 +1120,6 @@ function getDeviceColor(device){
 
 	if (device.deviceType == DEVICE_THERMOMETER) {
 		var t;
-
 		if (device.celcius == true) t = Math.round(device.temp / 100); else t = (Math.round((device.temp / 100) * 9/5) + 32);
 
 		if (device.online) {
@@ -1074,11 +1133,20 @@ function getDeviceColor(device){
 		}
 	}
 
+	if (device.deviceType == DEVICE_INTERVAL_TIMER) {
+		if (device.online) {
+//			console.log('device.it_on = ' + device.it_on + ' ' + device.it_currTime);
+			if (device.errorCode == 1) return RED; else return GREEN;
+		} else {
+			if (!device.errorCode == 1) return OFFLINE_RED; else return OFFLINE_GREEN;			
+		}
+	}
+
 	if (device.deviceType == DEVICE_THERMOSTAT) {
 		var t;
 
 		if (device.celcius == true) t = Math.round(device.t_temp / 100); else t = (Math.round((device.t_temp / 100) * 9/5) + 32);
-		console.log (device.t_minTemp + ' ' + device.t_maxTemp + ' ' + device.t_temp + ' ' + device.t_on);
+//		console.log (device.t_minTemp + ' ' + device.t_maxTemp + ' ' + device.t_temp + ' ' + device.t_on);
 		if (device.online) {
 			if ((t < device.t_minTemp - 3) && (device.t_minTemp != 0)) return RED;
 			else if ((t > device.t_maxTemp + 3) && (device.t_maxTemp != 0)) return RED;
@@ -1107,20 +1175,7 @@ function getDeviceColor(device){
 				case 3: return OFFLINE_YELLOW;
 				case 4: return OFFLINE_BLUE;
 			}			
-		}
-/*		
-		if (device.online) {
-			if (device.currentPosition <= 0) return GREEN; //Curtain is up
-			else if (device.currentPosition > 900) return RED;
-			else if (device.currentPosition >= device.rotationCount) return BLUE;
-			else return YELLOW;
-		} else {
-			if (device.currentPosition <= 0) return OFFLINE_GREEN; //Curtain is up
-			else if (device.currentPosition > 900) return OFFLINE_RED;
-			else if (device.currentPosition >= device.rotationCount) return OFFLINE_BLUE;
-			else return OFFLINE_YELLOW;		
-		}
-*/		
+		}		
 	}
 }
 
@@ -1218,6 +1273,26 @@ function processJson(jsonString){
 //					var ip = json.devices[i].ip.split('.',4);
 					button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + "</p></br><p class='pbutton2'>" + st + " " + deviceTime + "</p>";
 				}
+				if (json.devices[i].deviceType == DEVICE_INTERVAL_TIMER) {
+					button.style.backgroundColor = getDeviceColor(json.devices[i]);
+					var st;
+//					console.log("-->" + json.devices[i].it_onTime + " " + json.devices[i].it_offTime + " " + json.devices[i].it_currTime/1000);
+					if (json.devices[i].it_on == 1) {
+						var tm = ((json.devices[i].it_onTime * 60 - json.devices[i].it_currTime/1000)/60);
+					} else {
+						var tm = ((json.devices[i].it_offTime * 60 - json.devices[i].it_currTime/1000)/60);
+					}
+					if (tm < 0) tm = 0;
+					if (json.devices[i].it_on == 1 ) {
+						var OnState = "(ON) ";
+					} else {
+						var OnState = "(OFF) ";
+					}
+					button.innerHTML = "<p class='pbutton1'>" + json.devices[i].deviceName + " " + json.devices[i].it_flowSensorCount + "</p></br><p class='pbutton2'>" + 
+										OnState + "On: " + json.devices[i].it_onTime + 
+										"  Off: " + json.devices[i].it_offTime + 
+										"  Timer: " + tm.toFixed(1) + "</p>";
+				}				
 				if (json.devices[i].deviceType == DEVICE_THERMOMETER) {
 
 					button.style.backgroundColor = getDeviceColor(json.devices[i]);
